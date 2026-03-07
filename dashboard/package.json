@@ -2,13 +2,11 @@
   "name": "auto-blog-dashboard",
   "version": "1.0.0",
   "description": "Dashboard for managing auto blog publisher",
-  "private": true,
+  "main": "index.js",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node server.js"
+    "start": "node index.js"
   },
   "dependencies": {
-    "express": "^4.21.0",
-    "better-sqlite3": "^11.0.0"
+    "express": "^4.21.0"
   }
 }
