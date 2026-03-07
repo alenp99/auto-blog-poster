@@ -1,0 +1,47 @@
+[
+  {
+    "name": "Synthera",
+    "domain": "https://www.synthera.com.au",
+    "platform": "nextjs",
+
+    "content_mode": "mdx",
+    "content_path": "content/blog",
+
+    "niche": "AI automation, SaaS platforms, AI agents",
+    "tone": "professional and modern",
+
+    "target_keywords": [
+      "AI business automation",
+      "AI voice agents",
+      "customer support automation"
+    ],
+
+    "post_length": 1500,
+
+    "auto_publish": true,
+    "publish_method": "git_commit"
+  },
+
+  {
+    "name": "TechFuture",
+    "domain": "https://techfuture.io",
+    "platform": "nextjs",
+
+    "content_mode": "api",
+    "publish_endpoint": "https://techfuture.io/api/blog/create",
+
+    "niche": "future technology, AI tools, startups",
+    "tone": "informative and engaging",
+
+    "target_keywords": [
+      "AI trends",
+      "startup AI tools",
+      "automation platforms"
+    ],
+
+    "post_length": 1200,
+
+    "auto_publish": true,
+    "publish_method": "api"
+  }
+]
