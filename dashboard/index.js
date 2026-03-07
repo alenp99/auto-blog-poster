@@ -247,6 +247,52 @@ async function analyzeWebsite(domain, siteId) {
   }
   if (blogSamples.length > 0) updateProgress(siteId, "Posts Read", "Read " + blogSamples.length + " blog posts");
 
+  // Try to discover blog API endpoint
+  updateProgress(siteId, "API Discovery", "Probing for blog API endpoints...");
+  let detectedApiEndpoint = "";
+  const apiPaths = [
+    "/api/blog", "/api/blogs", "/api/posts", "/api/articles",
+    "/api/blog/create", "/api/posts/create", "/api/v1/posts", "/api/v1/blog",
+    "/wp-json/wp/v2/posts", "/ghost/api/v3/content/posts"
+  ];
+  for (const apiPath of apiPaths) {
+    try {
+      const apiUrl = domain.replace(/\/$/, "") + apiPath;
+      const apiRes = await fetchUrl(apiUrl);
+      // Check if it returns JSON (likely a valid API)
+      if (apiRes.trim().startsWith("{") || apiRes.trim().startsWith("[")) {
+        detectedApiEndpoint = apiUrl;
+        updateProgress(siteId, "API Found", "Detected API at " + apiPath);
+        break;
+      }
+    } catch {}
+  }
+
+  // Also check page source for API clues
+  let detectedApiFromSource = "";
+  const apiPatterns = [
+    /["']\/api\/blog[^"']*["']/gi,
+    /["']\/api\/posts[^"']*["']/gi,
+    /["']\/api\/articles[^"']*["']/gi,
+    /fetch\(["']([^"']*\/api\/[^"']*blog[^"']*)["']/gi,
+    /fetch\(["']([^"']*\/api\/[^"']*post[^"']*)["']/gi,
+  ];
+  for (const pat of apiPatterns) {
+    const m = homepageHtml.match(pat) || blogHtml.match(pat);
+    if (m && m[0]) {
+      const cleaned = m[0].replace(/["']/g, "").replace(/fetch\(/g, "");
+      if (cleaned.startsWith("/")) detectedApiFromSource = domain.replace(/\/$/, "") + cleaned;
+      else if (cleaned.startsWith("http")) detectedApiFromSource = cleaned;
+      break;
+    }
+  }
+
+  if (!detectedApiEndpoint && detectedApiFromSource) {
+    detectedApiEndpoint = detectedApiFromSource;
+    updateProgress(siteId, "API Found", "Found API reference in source code");
+  }
+  if (!detectedApiEndpoint) updateProgress(siteId, "API Discovery", "No public API found — can be added manually in settings");
+
   const fallback = {
     name: title || new URL(domain).hostname.replace("www.", "").split(".")[0],
     niche: description || "General",
@@ -255,6 +301,7 @@ async function analyzeWebsite(domain, siteId) {
     blog_path: blogPath,
     brand_voice: "Professional",
     content_style: "Standard blog format",
+    publish_endpoint: detectedApiEndpoint,
   };
 
   if (!OPENAI_API_KEY && !GEMINI_API_KEY) {
@@ -266,11 +313,12 @@ async function analyzeWebsite(domain, siteId) {
   // Ask AI to analyze
   updateProgress(siteId, "AI Analysis", "Sending data to AI for deep analysis...");
   try {
-    const analysis = await aiRequest(`Analyze this website and tell me about it. Study the homepage content and any blog posts to understand the business.
+    const analysis = await aiRequest(`Analyze this website and tell me about it. Study the homepage content and any blog posts to understand the business. Also determine the tech stack and likely blog API endpoint.
 
 WEBSITE: ${domain}
 PAGE TITLE: ${title}
 META DESCRIPTION: ${description}
+${detectedApiEndpoint ? "DETECTED API ENDPOINT: " + detectedApiEndpoint : "NO API ENDPOINT DETECTED VIA PROBING"}
 
 HOMEPAGE CONTENT:
 ${homepageText}
@@ -285,11 +333,15 @@ Respond in this exact JSON format:
   "tone": "The writing tone (e.g. 'professional and modern', 'casual and friendly')",
   "target_keywords": ["keyword1", "keyword2", "keyword3", "keyword4", "keyword5"],
   "brand_voice": "Describe the brand personality and voice in one sentence",
-  "content_style": "How articles are structured - paragraph length, heading patterns, use of lists"
+  "content_style": "How articles are structured - paragraph length, heading patterns, use of lists",
+  "tech_stack": "Detected tech stack (e.g. Next.js, WordPress, Ghost, custom)",
+  "publish_endpoint": "The most likely blog post creation API endpoint URL, or empty string if unknown. For WordPress use /wp-json/wp/v2/posts, for Ghost use their API, for Next.js guess /api/blog/create, etc."
 }`);
-    updateProgress(siteId, "Complete", "AI analysis finished — " + (analysis.name || "site") + " identified");
+    // Use probed endpoint if found, otherwise use AI suggestion
+    const finalEndpoint = detectedApiEndpoint || analysis.publish_endpoint || "";
+    updateProgress(siteId, "Complete", "AI analysis finished — " + (analysis.name || "site") + " identified" + (finalEndpoint ? " (API: " + finalEndpoint + ")" : ""));
     completeProgress(siteId);
-    return { ...analysis, blog_path: blogPath };
+    return { ...analysis, blog_path: blogPath, publish_endpoint: finalEndpoint };
   } catch (err) {
     console.error("AI analysis failed, using fallback:", err.message);
     updateProgress(siteId, "Complete", "AI unavailable — used basic crawl data");
@@ -457,8 +509,9 @@ app.post("/sites", async (req, res) => {
         blog_path: analysis.blog_path || "/blog",
         brand_voice: analysis.brand_voice || "",
         content_style: analysis.content_style || "",
+        tech_stack: analysis.tech_stack || "",
         post_length: 1500,
-        publish_endpoint: "",
+        publish_endpoint: analysis.publish_endpoint || "",
         publish_api_key: "",
         status: "ready",
       };
@@ -568,6 +621,8 @@ app.get("/sites/:id", (req, res) => {
           <div class="meta-item"><strong>Brand Voice</strong><span>${esc(site.brand_voice)}</span></div>
           <div class="meta-item"><strong>Content Style</strong><span>${esc(site.content_style)}</span></div>
           <div class="meta-item"><strong>Blog Path</strong><span>${esc(site.blog_path)}</span></div>
+          <div class="meta-item"><strong>Tech Stack</strong><span>${esc(site.tech_stack || "Unknown")}</span></div>
+          ${site.publish_endpoint ? '<div class="meta-item"><strong>Detected API</strong><span>' + esc(site.publish_endpoint) + '</span></div>' : ''}
         </div>
         <form method="POST" action="/sites/${site.id}/rescan" style="display:inline">
           <button type="submit" class="btn btn-secondary">Re-scan Website</button>
