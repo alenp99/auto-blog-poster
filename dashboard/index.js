@@ -164,7 +164,9 @@ function publishToApi(endpoint, apiKey, payload) {
       let data = ""; res.on("data", (c) => data += c);
       res.on("end", () => {
         if (res.statusCode >= 200 && res.statusCode < 300) {
-          let postUrl = ""; try { const p = JSON.parse(data); postUrl = p.url || p.slug || ""; } catch {} resolve({ success: true, url: postUrl });
+          let postUrl = ""; let postSlug = "";
+          try { const p = JSON.parse(data); postUrl = p.url || ""; postSlug = p.slug || ""; } catch {}
+          resolve({ success: true, url: postUrl, slug: postSlug, raw: data });
         } else { resolve({ success: false, error: "HTTP " + res.statusCode }); }
       });
     });
@@ -836,18 +838,15 @@ Respond in this exact JSON format:
     if (site.auto_approved && site.publish_endpoint) {
       updateProgress(genId, "Publishing", "Sending to blog API at " + site.publish_endpoint + "...");
       const payload = {
-        title: post.title, slug: post.slug, metaTitle: post.metaTitle,
-        metaDescription: post.metaDescription, excerpt: post.excerpt,
-        content: post.content, category: post.category, tags: post.tags,
-        date: new Date().toISOString().split("T")[0],
-        imagePrompt: post.imagePrompt, status: "published"
+        title: post.title, slug: post.slug, excerpt: post.excerpt,
+        content: post.content, author_name: site.name + " Team"
       };
       try {
         const r = await publishToApi(site.publish_endpoint, site.publish_api_key, payload);
         if (r.success) {
           status = "published";
-          publishedUrl = r.url || "";
-          updateProgress(genId, "Published", publishedUrl ? "Live at " + publishedUrl : "Published via API");
+          publishedUrl = r.url || (site.domain.replace(/\/$/, "") + (site.blog_path || "/blog") + "/" + (r.slug || post.slug));
+          updateProgress(genId, "Published", "Live at " + publishedUrl);
         } else {
           updateProgress(genId, "Publish Failed", r.error + " — saved for review instead");
         }
@@ -989,10 +988,10 @@ app.post("/posts/:id/approve", async (req, res) => {
   let publishedUrl = "";
   let publishStatus = "approved";
   if (site && site.publish_endpoint) {
-    const payload = { title: post.title, slug: post.slug, metaTitle: post.meta_title, metaDescription: post.meta_description, excerpt: post.excerpt, content: post.content, category: post.category, tags: post.tags || [], date: new Date().toISOString().split("T")[0], imagePrompt: post.image_prompt, status: "published" };
+    const payload = { title: post.title, slug: post.slug, excerpt: post.excerpt, content: post.content, author_name: (site ? site.name : "Blog") + " Team" };
     try {
       const r = await publishToApi(site.publish_endpoint, site.publish_api_key, payload);
-      if (r.success) { publishedUrl = r.url || ""; publishStatus = "published to API"; }
+      if (r.success) { publishedUrl = r.url || (site.domain.replace(/\/$/, "") + (site.blog_path || "/blog") + "/" + (r.slug || post.slug)); publishStatus = "published to API"; }
       else { publishStatus = "approved (API error: " + r.error + ")"; }
     } catch (e) { publishStatus = "approved (API error: " + e.message + ")"; }
   } else {
@@ -1035,8 +1034,8 @@ app.post("/api/posts", async (req, res) => {
   let publishedUrl = "";
 
   if (site.auto_approved && site.publish_endpoint) {
-    const payload = { title: post.title, slug: post.slug, metaTitle: post.metaTitle, metaDescription: post.metaDescription, excerpt: post.excerpt, content: post.content, category: post.category, tags: post.tags, date: new Date().toISOString().split("T")[0], imagePrompt: post.imagePrompt, status: "published" };
-    try { const r = await publishToApi(site.publish_endpoint, site.publish_api_key, payload); if (r.success) { status = "published"; publishedUrl = r.url || ""; } } catch {}
+    const payload = { title: post.title, slug: post.slug, excerpt: post.excerpt, content: post.content, author_name: site.name + " Team" };
+    try { const r = await publishToApi(site.publish_endpoint, site.publish_api_key, payload); if (r.success) { status = "published"; publishedUrl = r.url || site.domain + "/blog/" + post.slug; } } catch {}
   }
 
   const posts = getPosts();
