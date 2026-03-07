@@ -177,12 +177,76 @@ function publishToApi(endpoint, apiKey, payload) {
 
 function markdownToHtml(md) {
   if (!md) return "";
-  return md
-    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
-    .replace(/^### (.*$)/gm, "<h3>$1</h3>").replace(/^## (.*$)/gm, "<h2>$1</h2>").replace(/^# (.*$)/gm, "<h1>$1</h1>")
-    .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>").replace(/\*(.*?)\*/g, "<em>$1</em>")
-    .replace(/^- (.*$)/gm, "<li>$1</li>").replace(/^\d+\. (.*$)/gm, "<li>$1</li>")
-    .replace(/\n\n/g, "</p><p>").replace(/^(?!<[hulo])(.+)$/gm, "<p>$1</p>").replace(/<p><\/p>/g, "");
+  let html = md
+    // Don't double-escape if already HTML
+    .replace(/&(?!amp;|lt;|gt;|quot;)/g, "&amp;")
+    .replace(/^### (.*$)/gm, "<h3>$1</h3>")
+    .replace(/^## (.*$)/gm, "<h2>$1</h2>")
+    .replace(/^# (.*$)/gm, "<h1>$1</h1>")
+    .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>")
+    .replace(/\*(.*?)\*/g, "<em>$1</em>")
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>');
+
+  // Handle lists - group consecutive list items into <ul>
+  html = html.replace(/(^- .*$(\n|$))+/gm, (block) => {
+    const items = block.trim().split("\n").map(l => "<li>" + l.replace(/^- /, "") + "</li>").join("\n");
+    return "<ul>\n" + items + "\n</ul>\n";
+  });
+  html = html.replace(/(^\d+\. .*$(\n|$))+/gm, (block) => {
+    const items = block.trim().split("\n").map(l => "<li>" + l.replace(/^\d+\. /, "") + "</li>").join("\n");
+    return "<ol>\n" + items + "\n</ol>\n";
+  });
+
+  // Wrap remaining plain text lines in <p> tags
+  html = html.split("\n\n").map(block => {
+    block = block.trim();
+    if (!block) return "";
+    if (block.startsWith("<h") || block.startsWith("<ul") || block.startsWith("<ol") || block.startsWith("<p")) return block;
+    return "<p>" + block.replace(/\n/g, "<br>") + "</p>";
+  }).join("\n\n");
+
+  return html;
+}
+
+function generateImageUrl(keywords) {
+  // Use Unsplash source for a relevant free image
+  const query = encodeURIComponent(keywords.slice(0, 3).join(","));
+  return "https://source.unsplash.com/1200x630/?" + query;
+}
+
+function openaiImageGenerate(prompt) {
+  return new Promise((resolve, reject) => {
+    const body = JSON.stringify({
+      model: "dall-e-3",
+      prompt: prompt,
+      n: 1,
+      size: "1792x1024",
+      quality: "standard"
+    });
+    const req = https.request({
+      hostname: "api.openai.com",
+      path: "/v1/images/generations",
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer " + OPENAI_API_KEY,
+        "Content-Length": Buffer.byteLength(body)
+      }
+    }, (res) => {
+      let data = "";
+      res.on("data", (c) => data += c);
+      res.on("end", () => {
+        try {
+          const parsed = JSON.parse(data);
+          if (parsed.error) return reject(new Error(parsed.error.message));
+          resolve(parsed.data[0].url);
+        } catch (e) { reject(new Error("Image parse error")); }
+      });
+    });
+    req.on("error", reject);
+    req.write(body);
+    req.end();
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -829,6 +893,23 @@ Respond in this exact JSON format:
 
     updateProgress(genId, "Post Generated", "\"" + (post.title || "Untitled") + "\"");
 
+    // Generate hero image
+    let imageUrl = "";
+    updateProgress(genId, "Generating Image", "Creating hero image with DALL-E...");
+    try {
+      imageUrl = await openaiImageGenerate(post.imagePrompt || post.title);
+      updateProgress(genId, "Image Ready", "Hero image generated");
+    } catch (err) {
+      console.error("Image generation failed:", err.message);
+      // Fallback to Unsplash
+      const keywords = (site.target_keywords || []).length > 0 ? site.target_keywords : [post.category || site.niche || "technology"];
+      imageUrl = generateImageUrl(keywords);
+      updateProgress(genId, "Image Ready", "Using stock image (DALL-E unavailable)");
+    }
+
+    // Convert markdown to HTML for publishing
+    const htmlContent = markdownToHtml(post.content);
+
     // Save the post
     const postId = crypto.randomUUID();
     let status = "pending_review";
@@ -839,7 +920,7 @@ Respond in this exact JSON format:
       updateProgress(genId, "Publishing", "Sending to blog API at " + site.publish_endpoint + "...");
       const payload = {
         title: post.title, slug: post.slug, excerpt: post.excerpt,
-        content: post.content, author_name: site.name + " Team"
+        content: htmlContent, image_url: imageUrl, author_name: site.name + " Team"
       };
       try {
         const r = await publishToApi(site.publish_endpoint, site.publish_api_key, payload);
@@ -865,6 +946,8 @@ Respond in this exact JSON format:
       meta_title: post.metaTitle, meta_description: post.metaDescription,
       excerpt: post.excerpt, category: post.category,
       tags: post.tags || [], content: post.content,
+      html_content: htmlContent,
+      image_url: imageUrl,
       image_prompt: post.imagePrompt,
       social_linkedin: (post.socialSnippets || {}).linkedin || "",
       social_twitter: (post.socialSnippets || {}).twitter || "",
@@ -965,6 +1048,7 @@ app.get("/posts/:id", (req, res) => {
       </div>
       ${post.social_linkedin ? '<div class="social-box"><strong>LinkedIn:</strong> ' + esc(post.social_linkedin) + '</div>' : ""}
       ${post.social_twitter ? '<div class="social-box"><strong>Twitter/X:</strong> ' + esc(post.social_twitter) + '</div>' : ""}
+      ${post.image_url ? '<div class="article-preview" style="padding:0;overflow:hidden"><img src="' + esc(post.image_url) + '" alt="' + esc(post.title) + '" style="width:100%;height:300px;object-fit:cover;border-radius:var(--radius) var(--radius) 0 0"></div>' : ''}
       <div class="article-preview"><h2>Article Preview</h2><div class="article-content">${markdownToHtml(post.content)}</div></div>
       ${isPending ? `
       <div class="review-actions">
@@ -988,7 +1072,12 @@ app.post("/posts/:id/approve", async (req, res) => {
   let publishedUrl = "";
   let publishStatus = "approved";
   if (site && site.publish_endpoint) {
-    const payload = { title: post.title, slug: post.slug, excerpt: post.excerpt, content: post.content, author_name: (site ? site.name : "Blog") + " Team" };
+    const payload = {
+      title: post.title, slug: post.slug, excerpt: post.excerpt,
+      content: post.html_content || markdownToHtml(post.content),
+      image_url: post.image_url || "",
+      author_name: (site ? site.name : "Blog") + " Team"
+    };
     try {
       const r = await publishToApi(site.publish_endpoint, site.publish_api_key, payload);
       if (r.success) { publishedUrl = r.url || (site.domain.replace(/\/$/, "") + (site.blog_path || "/blog") + "/" + (r.slug || post.slug)); publishStatus = "published to API"; }
@@ -1033,8 +1122,9 @@ app.post("/api/posts", async (req, res) => {
   let status = "pending_review";
   let publishedUrl = "";
 
+  const htmlContent = markdownToHtml(post.content);
   if (site.auto_approved && site.publish_endpoint) {
-    const payload = { title: post.title, slug: post.slug, excerpt: post.excerpt, content: post.content, author_name: site.name + " Team" };
+    const payload = { title: post.title, slug: post.slug, excerpt: post.excerpt, content: htmlContent, image_url: post.imageUrl || "", author_name: site.name + " Team" };
     try { const r = await publishToApi(site.publish_endpoint, site.publish_api_key, payload); if (r.success) { status = "published"; publishedUrl = r.url || site.domain + "/blog/" + post.slug; } } catch {}
   }
 
@@ -1044,6 +1134,8 @@ app.post("/api/posts", async (req, res) => {
     meta_title: post.metaTitle, meta_description: post.metaDescription,
     excerpt: post.excerpt, category: post.category,
     tags: post.tags || [], content: post.content,
+    html_content: htmlContent,
+    image_url: post.imageUrl || "",
     image_prompt: post.imagePrompt,
     social_linkedin: (post.socialSnippets || {}).linkedin || "",
     social_twitter: (post.socialSnippets || {}).twitter || "",
