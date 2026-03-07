@@ -1,0 +1,193 @@
+{
+  "name": "Auto Blog Publisher - Every 4 Days",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "days",
+              "daysInterval": 4,
+              "triggerAtHour": 8
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Every 4 Days at 8 AM",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.github.com/repos/alenp99/auto-blog-poster/dispatches",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            },
+            {
+              "name": "X-GitHub-Api-Version",
+              "value": "2022-11-28"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n  \"event_type\": \"generate-blog\",\n  \"client_payload\": {\n    \"trigger\": \"n8n\",\n    \"timestamp\": \"{{ $now.toISO() }}\"\n  }\n}",
+        "options": {}
+      },
+      "id": "github-dispatch",
+      "name": "Trigger GitHub Actions",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [500, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "GitHub PAT"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "check-status",
+              "leftValue": "={{ $json.statusCode }}",
+              "rightValue": 204,
+              "operator": {
+                "type": "number",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "check-success",
+      "name": "Check Success",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [750, 300]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "log-success",
+              "name": "status",
+              "value": "Blog generation triggered successfully",
+              "type": "string"
+            },
+            {
+              "id": "log-time",
+              "name": "triggered_at",
+              "value": "={{ $now.toISO() }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "success-log",
+      "name": "Log Success",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1000, 200]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "log-fail",
+              "name": "status",
+              "value": "Blog generation trigger FAILED",
+              "type": "string"
+            },
+            {
+              "id": "log-error",
+              "name": "error",
+              "value": "={{ $json }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "failure-log",
+      "name": "Log Failure",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1000, 400]
+    }
+  ],
+  "connections": {
+    "Every 4 Days at 8 AM": {
+      "main": [
+        [
+          {
+            "node": "Trigger GitHub Actions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Trigger GitHub Actions": {
+      "main": [
+        [
+          {
+            "node": "Check Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Success": {
+      "main": [
+        [
+          {
+            "node": "Log Success",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    {
+      "name": "automation"
+    },
+    {
+      "name": "blog"
+    }
+  ]
+}
