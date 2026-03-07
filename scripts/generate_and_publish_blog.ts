@@ -4,9 +4,10 @@
  * generate_and_publish_blog.ts
  *
  * Main entry point for the auto blog publisher.
- * 1. Crawls each target website to study its style, content, and structure
- * 2. Uses Gemini AI to generate blog posts that match the site
- * 3. Publishes directly to the site's blog API
+ * 1. Fetches site configs from the dashboard API
+ * 2. Crawls each target website to study its style, content, and structure
+ * 3. Uses Gemini AI to generate blog posts that match the site
+ * 4. Submits posts to the dashboard for review or auto-publish
  *
  * Triggered by: n8n (every 4 days at 8 AM Sydney) → GitHub Actions → this script
  */
@@ -26,6 +27,8 @@ const PUBLISHED_FILE = path.join(CACHE_DIR, "published_posts.json");
 const TOPIC_IDEAS_FILE = path.join(CACHE_DIR, "topic_ideas.json");
 const RESEARCH_FILE = path.join(CACHE_DIR, "research_notes.md");
 const IMAGE_PROMPTS_FILE = path.join(CACHE_DIR, "image_prompts.md");
+
+const DASHBOARD_URL = process.env.DASHBOARD_URL || "http://localhost:3000";
 
 interface Site {
   name: string;
@@ -64,6 +67,56 @@ interface TopicIdea {
   selected: string;
   rejected: string[];
   reason: string;
+}
+
+// ---------------------------------------------------------------------------
+// Dashboard API helpers
+// ---------------------------------------------------------------------------
+function httpRequest(url: string, method: string, body?: any): Promise<any> {
+  return new Promise((resolve, reject) => {
+    const parsedUrl = new URL(url);
+    const client = parsedUrl.protocol === "https:" ? https : http;
+    const bodyStr = body ? JSON.stringify(body) : undefined;
+    const headers: Record<string, string> = { "Accept": "application/json" };
+    if (bodyStr) {
+      headers["Content-Type"] = "application/json";
+      headers["Content-Length"] = Buffer.byteLength(bodyStr).toString();
+    }
+
+    const req = client.request({
+      hostname: parsedUrl.hostname,
+      port: parsedUrl.port,
+      path: parsedUrl.pathname + parsedUrl.search,
+      method,
+      headers,
+    }, (res) => {
+      let data = "";
+      res.on("data", (chunk) => data += chunk);
+      res.on("end", () => {
+        try { resolve(JSON.parse(data)); } catch { resolve(data); }
+      });
+    });
+    req.on("error", reject);
+    if (bodyStr) req.write(bodyStr);
+    req.end();
+  });
+}
+
+async function fetchSitesFromDashboard(): Promise<Site[]> {
+  try {
+    const sites = await httpRequest(`${DASHBOARD_URL}/api/sites`, "GET");
+    if (Array.isArray(sites) && sites.length > 0) {
+      console.log(`Loaded ${sites.length} site(s) from dashboard`);
+      return sites;
+    }
+  } catch (err: any) {
+    console.log(`Dashboard not available (${err.message}), falling back to local sites.json`);
+  }
+  return [];
+}
+
+async function submitPostToDashboard(siteId: string, post: any): Promise<{ id: string; status: string; publishedUrl: string }> {
+  return httpRequest(`${DASHBOARD_URL}/api/posts`, "POST", { site_id: siteId, post });
 }
 
 interface SiteProfile {
@@ -535,7 +588,7 @@ async function processSite(
     status: site.auto_publish ? "published" : "draft",
   };
 
-  // Save payload locally regardless of publish method
+  // Save payload locally as backup
   const payloadFileName = `${site.name.toLowerCase()}_${post.slug}.json`;
   const payloadPath = path.join(ROOT, "output", "api_payloads", payloadFileName);
   fs.writeFileSync(payloadPath, JSON.stringify(apiPayload, null, 2));
@@ -545,44 +598,45 @@ async function processSite(
   let publishedUrl = "";
   let status = "draft";
 
-  // Also generate MDX if configured
-  if (site.content_mode === "mdx" && site.content_path) {
-    const mdxContent = `---
-title: "${post.title}"
-slug: "${post.slug}"
-metaTitle: "${post.metaTitle}"
-metaDescription: "${post.metaDescription}"
-excerpt: "${post.excerpt}"
-date: "${today}"
-category: "${post.category}"
-tags: ${JSON.stringify(post.tags)}
-featuredImage: "/images/blog/${post.slug}.webp"
-imagePrompt: "${post.imagePrompt.replace(/"/g, '\\"')}"
-author: "${site.name} Team"
-draft: ${!site.auto_publish}
----
-
-${post.content}
-`;
-    const mdxPath = path.join(ROOT, site.content_path, `${post.slug}.mdx`);
-    fs.writeFileSync(mdxPath, mdxContent);
-    outputPath = `${site.content_path}/${post.slug}.mdx`;
-    console.log(`  MDX file: ${outputPath}`);
-  }
-
-  // Publish to API if endpoint is configured and auto_publish is on
-  if (site.publish_endpoint && site.auto_publish) {
-    console.log(`  Publishing to ${site.publish_endpoint}...`);
-    const publishResult = await publishToApi(site, apiPayload);
-
-    if (publishResult.success) {
-      status = "published";
-      publishedUrl = publishResult.url || `${site.domain}/blog/${post.slug}`;
-      console.log(`  Published successfully: ${publishedUrl}`);
-    } else {
-      status = "publish_failed";
-      console.error(`  Publish failed: ${publishResult.error}`);
-      console.log(`  Payload saved locally for manual retry`);
+  // Submit to dashboard — it handles review vs auto-publish
+  const siteId = (site as any).id;
+  if (siteId) {
+    console.log(`  Submitting to dashboard...`);
+    try {
+      const dashResult = await submitPostToDashboard(siteId, post);
+      status = dashResult.status;
+      publishedUrl = dashResult.publishedUrl || "";
+      if (status === "published") {
+        console.log(`  Auto-published: ${publishedUrl}`);
+      } else if (status === "pending_review") {
+        console.log(`  Held for review on dashboard (first-time site)`);
+      }
+    } catch (err: any) {
+      console.log(`  Dashboard submit failed (${err.message}), falling back to direct publish`);
+      // Fallback: publish directly if dashboard is unavailable
+      if (site.publish_endpoint && site.auto_publish) {
+        const publishResult = await publishToApi(site, apiPayload);
+        if (publishResult.success) {
+          status = "published";
+          publishedUrl = publishResult.url || `${site.domain}/blog/${post.slug}`;
+        } else {
+          status = "publish_failed";
+        }
+      }
+    }
+  } else {
+    // No dashboard ID, publish directly
+    if (site.publish_endpoint && site.auto_publish) {
+      console.log(`  Publishing directly to ${site.publish_endpoint}...`);
+      const publishResult = await publishToApi(site, apiPayload);
+      if (publishResult.success) {
+        status = "published";
+        publishedUrl = publishResult.url || `${site.domain}/blog/${post.slug}`;
+        console.log(`  Published: ${publishedUrl}`);
+      } else {
+        status = "publish_failed";
+        console.error(`  Publish failed: ${publishResult.error}`);
+      }
     }
   }
 
@@ -626,12 +680,15 @@ async function main() {
     process.exit(1);
   }
 
-  if (!fs.existsSync(SITES_FILE)) {
-    console.error("Error: .claude/cache/sites.json not found.");
-    process.exit(1);
+  // Try loading sites from dashboard first, fallback to local JSON
+  let sites: Site[] = await fetchSitesFromDashboard();
+  if (sites.length === 0) {
+    if (!fs.existsSync(SITES_FILE)) {
+      console.error("Error: No sites found in dashboard or .claude/cache/sites.json.");
+      process.exit(1);
+    }
+    sites = JSON.parse(fs.readFileSync(SITES_FILE, "utf-8"));
   }
-
-  const sites: Site[] = JSON.parse(fs.readFileSync(SITES_FILE, "utf-8"));
   if (!Array.isArray(sites) || sites.length === 0) {
     console.error("Error: No sites configured.");
     process.exit(1);
