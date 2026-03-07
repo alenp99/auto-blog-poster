@@ -832,9 +832,9 @@ Respond in this exact JSON format:
     let status = "pending_review";
     let publishedUrl = "";
 
-    // Auto-publish if site is auto-approved and has an API endpoint
+    // Only auto-publish if site is auto-approved AND has a working API endpoint
     if (site.auto_approved && site.publish_endpoint) {
-      updateProgress(genId, "Publishing", "Sending to blog API...");
+      updateProgress(genId, "Publishing", "Sending to blog API at " + site.publish_endpoint + "...");
       const payload = {
         title: post.title, slug: post.slug, metaTitle: post.metaTitle,
         metaDescription: post.metaDescription, excerpt: post.excerpt,
@@ -846,15 +846,18 @@ Respond in this exact JSON format:
         const r = await publishToApi(site.publish_endpoint, site.publish_api_key, payload);
         if (r.success) {
           status = "published";
-          publishedUrl = r.url || site.domain + "/blog/" + post.slug;
-          updateProgress(genId, "Published", "Live at " + publishedUrl);
+          publishedUrl = r.url || "";
+          updateProgress(genId, "Published", publishedUrl ? "Live at " + publishedUrl : "Published via API");
         } else {
-          updateProgress(genId, "Publish Failed", r.error + " — saved for review");
+          updateProgress(genId, "Publish Failed", r.error + " — saved for review instead");
         }
-      } catch {}
-    } else if (site.auto_approved) {
-      status = "published";
-      publishedUrl = site.domain + "/blog/" + post.slug;
+      } catch (e) {
+        updateProgress(genId, "Publish Failed", e.message + " — saved for review instead");
+      }
+    } else if (!site.auto_approved) {
+      updateProgress(genId, "Needs Review", "First post — waiting for your approval before publishing");
+    } else {
+      updateProgress(genId, "No API", "No publish endpoint configured — saved for review");
     }
 
     const posts = getPosts();
@@ -940,7 +943,7 @@ app.get("/posts/:id", (req, res) => {
   const site = getSites().find(s => s.id === post.site_id);
   const tags = (post.tags || []).join(", ");
   const isPending = post.status === "pending_review";
-  const bc = post.status === "published" ? "badge-published" : post.status === "pending_review" ? "badge-pending" : "badge-rejected";
+  const bc = post.status === "published" ? "badge-published" : post.status === "pending_review" ? "badge-pending" : post.status === "approved" ? "badge-published" : "badge-rejected";
 
   res.send(render(post.title, `
     <div class="post-detail">
@@ -969,6 +972,7 @@ app.get("/posts/:id", (req, res) => {
         <form method="POST" action="/posts/${post.id}/approve" style="display:inline"><button type="submit" class="btn btn-primary btn-large">Approve &amp; Publish</button></form>
         <form method="POST" action="/posts/${post.id}/reject" style="display:inline"><button type="submit" class="btn btn-danger btn-large">Reject</button></form>
       </div>` : ""}
+      ${post.publish_status ? '<div class="social-box"><strong>Status:</strong> ' + esc(post.publish_status) + '</div>' : ''}
       ${post.published_url ? '<p class="published-link">Published at <a href="' + esc(post.published_url) + '" target="_blank">' + esc(post.published_url) + '</a></p>' : ""}
     </div>
   `));
@@ -982,18 +986,27 @@ app.post("/posts/:id/approve", async (req, res) => {
   const post = posts[idx];
   const site = sites.find(s => s.id === post.site_id);
 
-  let publishedUrl = site ? site.domain + "/blog/" + post.slug : "";
+  let publishedUrl = "";
+  let publishStatus = "approved";
   if (site && site.publish_endpoint) {
     const payload = { title: post.title, slug: post.slug, metaTitle: post.meta_title, metaDescription: post.meta_description, excerpt: post.excerpt, content: post.content, category: post.category, tags: post.tags || [], date: new Date().toISOString().split("T")[0], imagePrompt: post.image_prompt, status: "published" };
-    try { const r = await publishToApi(site.publish_endpoint, site.publish_api_key, payload); if (r.success && r.url) publishedUrl = r.url; } catch {}
+    try {
+      const r = await publishToApi(site.publish_endpoint, site.publish_api_key, payload);
+      if (r.success) { publishedUrl = r.url || ""; publishStatus = "published to API"; }
+      else { publishStatus = "approved (API error: " + r.error + ")"; }
+    } catch (e) { publishStatus = "approved (API error: " + e.message + ")"; }
+  } else {
+    publishStatus = "approved (no API endpoint — configure in site settings to auto-publish)";
   }
 
-  posts[idx].status = "published";
+  posts[idx].status = publishedUrl ? "published" : "approved";
   posts[idx].published_url = publishedUrl;
+  posts[idx].publish_status = publishStatus;
   posts[idx].published_at = new Date().toISOString();
   savePosts(posts);
 
-  if (site) { const si = sites.findIndex(s => s.id === site.id); if (si !== -1) { sites[si].auto_approved = true; saveSites(sites); } }
+  // Only set auto_approved if we actually published successfully via API
+  if (site && publishedUrl) { const si = sites.findIndex(s => s.id === site.id); if (si !== -1) { sites[si].auto_approved = true; saveSites(sites); } }
   res.redirect("/posts/" + req.params.id);
 });
 
@@ -1023,10 +1036,7 @@ app.post("/api/posts", async (req, res) => {
 
   if (site.auto_approved && site.publish_endpoint) {
     const payload = { title: post.title, slug: post.slug, metaTitle: post.metaTitle, metaDescription: post.metaDescription, excerpt: post.excerpt, content: post.content, category: post.category, tags: post.tags, date: new Date().toISOString().split("T")[0], imagePrompt: post.imagePrompt, status: "published" };
-    try { const r = await publishToApi(site.publish_endpoint, site.publish_api_key, payload); if (r.success) { status = "published"; publishedUrl = r.url || site.domain + "/blog/" + post.slug; } } catch {}
-  } else if (site.auto_approved) {
-    status = "published";
-    publishedUrl = site.domain + "/blog/" + post.slug;
+    try { const r = await publishToApi(site.publish_endpoint, site.publish_api_key, payload); if (r.success) { status = "published"; publishedUrl = r.url || ""; } } catch {}
   }
 
   const posts = getPosts();
