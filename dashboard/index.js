@@ -8,6 +8,7 @@ const http = require("http");
 const app = express();
 const PORT = process.env.PORT || 3000;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
 
 // ---------------------------------------------------------------------------
 // JSON file database
@@ -111,6 +112,47 @@ function geminiRequest(prompt) {
   });
 }
 
+function openaiRequest(prompt) {
+  return new Promise((resolve, reject) => {
+    const body = JSON.stringify({
+      model: "gpt-4o-mini",
+      messages: [{ role: "user", content: prompt }],
+      temperature: 0.3,
+      response_format: { type: "json_object" }
+    });
+    const req = https.request({
+      hostname: "api.openai.com",
+      path: "/v1/chat/completions",
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer " + OPENAI_API_KEY,
+        "Content-Length": Buffer.byteLength(body)
+      }
+    }, (res) => {
+      let data = "";
+      res.on("data", (c) => data += c);
+      res.on("end", () => {
+        try {
+          const parsed = JSON.parse(data);
+          if (parsed.error) return reject(new Error("OpenAI error: " + parsed.error.message));
+          const text = parsed.choices[0].message.content;
+          resolve(JSON.parse(text));
+        } catch (e) { reject(new Error("OpenAI parse error: " + data.substring(0, 300))); }
+      });
+    });
+    req.on("error", reject);
+    req.write(body);
+    req.end();
+  });
+}
+
+function aiRequest(prompt) {
+  if (OPENAI_API_KEY) return openaiRequest(prompt);
+  if (GEMINI_API_KEY) return geminiRequest(prompt);
+  return Promise.reject(new Error("No AI API key configured"));
+}
+
 function publishToApi(endpoint, apiKey, payload) {
   return new Promise((resolve) => {
     const url = new URL(endpoint);
@@ -193,11 +235,11 @@ async function analyzeWebsite(domain) {
     content_style: "Standard blog format",
   };
 
-  if (!GEMINI_API_KEY) return fallback;
+  if (!OPENAI_API_KEY && !GEMINI_API_KEY) return fallback;
 
-  // Ask Gemini to analyze
+  // Ask AI to analyze
   try {
-    const analysis = await geminiRequest(`Analyze this website and tell me about it. Study the homepage content and any blog posts to understand the business.
+    const analysis = await aiRequest(`Analyze this website and tell me about it. Study the homepage content and any blog posts to understand the business.
 
 WEBSITE: ${domain}
 PAGE TITLE: ${title}
@@ -220,7 +262,7 @@ Respond in this exact JSON format:
 }`);
     return { ...analysis, blog_path: blogPath };
   } catch (err) {
-    console.error("Gemini analysis failed, using fallback:", err.message);
+    console.error("AI analysis failed, using fallback:", err.message);
     return fallback;
   }
 }
