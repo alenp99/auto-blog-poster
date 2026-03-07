@@ -440,6 +440,7 @@ app.get("/sites", (req, res) => {
           (s.target_keywords && s.target_keywords.length ? '<span>Keywords: ' + esc(s.target_keywords.slice(0, 3).join(", ")) + '</span>' : '') +
           '</div>' +
           '<div class="site-actions">' +
+          (isAnalyzing ? '' : '<form method="POST" action="/sites/' + s.id + '/generate" style="display:inline"><button type="submit" class="btn btn-primary">Generate Post</button></form>') +
           (isAnalyzing ? '' : '<a href="/sites/' + s.id + '" class="btn btn-secondary">Settings</a>') +
           '<form method="POST" action="/sites/' + s.id + '/delete" style="display:inline" onsubmit="return confirm(\'Delete this site?\')"><button type="submit" class="btn btn-danger">Delete</button></form>' +
           '</div></div>';
@@ -642,6 +643,12 @@ app.get("/sites/:id", (req, res) => {
         </div>
         <button type="submit" class="btn btn-primary btn-large">Save</button>
       </form>
+
+      <h2 style="margin-top:2rem">Generate Blog Post</h2>
+      <p class="form-description">Generate a new SEO blog post for this site using AI right now.</p>
+      <form method="POST" action="/sites/${site.id}/generate">
+        <button type="submit" class="btn btn-primary btn-large">Generate Post Now</button>
+      </form>
     </div>
   `));
 });
@@ -678,6 +685,211 @@ app.post("/sites/:id/rescan", async (req, res) => {
     const i = updated.findIndex(s => s.id === req.params.id);
     if (i !== -1) { updated[i].status = "ready"; saveSites(updated); }
   }
+});
+
+// Generate a blog post for a site
+app.post("/sites/:id/generate", async (req, res) => {
+  const sites = getSites();
+  const site = sites.find(s => s.id === req.params.id);
+  if (!site) return res.status(404).send("Not found");
+
+  const genId = "gen-" + req.params.id;
+  analysisProgress[genId] = { steps: [], status: "analyzing" };
+
+  res.send(render("Generating Post", `
+    <div class="form-page" style="text-align:center">
+      <div class="progress-icon">
+        <svg width="64" height="64" viewBox="0 0 64 64" style="animation:spin 2s linear infinite">
+          <circle cx="32" cy="32" r="28" stroke="var(--border)" stroke-width="4" fill="none"/>
+          <path d="M32 4 A28 28 0 0 1 60 32" stroke="var(--primary)" stroke-width="4" fill="none" stroke-linecap="round"/>
+        </svg>
+      </div>
+      <h1 style="margin-top:1.5rem">Generating Blog Post</h1>
+      <p class="domain" style="margin-bottom:2rem">${esc(site.name)} &mdash; <a href="${esc(site.domain)}" target="_blank">${esc(site.domain)}</a></p>
+      <div id="steps" class="progress-steps"></div>
+      <p id="status-text" class="form-description" style="margin-top:1.5rem">Starting generation...</p>
+    </div>
+    <style>
+      @keyframes spin { to { transform: rotate(360deg); } }
+      .progress-steps { text-align: left; max-width: 500px; margin: 0 auto; }
+      .step { padding: 0.6rem 1rem; margin: 0.4rem 0; border-radius: 8px; background: var(--surface); border: 1px solid var(--border); display: flex; align-items: center; gap: 0.75rem; font-size: 0.9rem; }
+      .step .check { color: var(--success); font-weight: bold; }
+      .step .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--primary); animation: pulse 1s infinite; }
+      .step .detail { color: var(--text-muted); font-size: 0.8rem; margin-left: auto; }
+    </style>
+    <script>
+      const genId = "${genId}";
+      async function poll() {
+        try {
+          const res = await fetch("/api/sites/" + genId.replace("gen-","") + "/generate-progress");
+          const data = await res.json();
+          const el = document.getElementById("steps");
+          const statusEl = document.getElementById("status-text");
+          if (data.steps && data.steps.length > 0) {
+            el.innerHTML = data.steps.map((s, i) => {
+              const isLast = i === data.steps.length - 1 && data.status !== "done";
+              return '<div class="step">' +
+                (isLast ? '<span class="dot"></span>' : '<span class="check">&#10003;</span>') +
+                '<span>' + s.step + '</span>' +
+                '<span class="detail">' + s.detail + '</span></div>';
+            }).join("");
+            statusEl.textContent = data.steps[data.steps.length - 1].detail;
+          }
+          if (data.status === "done") {
+            statusEl.innerHTML = 'Blog post generated! Redirecting...';
+            setTimeout(() => { window.location.href = data.postUrl || "/posts"; }, 1500);
+            return;
+          }
+        } catch {}
+        setTimeout(poll, 1000);
+      }
+      poll();
+    </script>
+  `));
+
+  // Generate in background
+  try {
+    updateProgress(genId, "Crawling", "Fetching latest content from " + site.domain + "...");
+
+    // Crawl the site for fresh context
+    let homepageText = "";
+    try {
+      const html = await fetchUrl(site.domain);
+      homepageText = htmlToText(html).substring(0, 3000);
+    } catch {}
+
+    let blogSamples = [];
+    const blogUrl = site.domain.replace(/\/$/, "") + (site.blog_path || "/blog");
+    try {
+      const blogHtml = await fetchUrl(blogUrl);
+      const linkRegex = /<a[^>]*href="([^"]*)"[^>]*>/gi;
+      const links = [];
+      let m;
+      while ((m = linkRegex.exec(blogHtml)) !== null) {
+        let href = m[1];
+        if (href.startsWith("/")) href = site.domain.replace(/\/$/, "") + href;
+        if (href.startsWith(site.domain) && href.includes(site.blog_path + "/")) links.push(href);
+      }
+      const unique = [...new Set(links)].slice(0, 3);
+      for (const link of unique) {
+        try { blogSamples.push(htmlToText(await fetchUrl(link)).substring(0, 1500)); } catch {}
+      }
+    } catch {}
+    updateProgress(genId, "Content Gathered", "Read homepage + " + blogSamples.length + " existing blog posts");
+
+    // Get existing post titles to avoid duplicates
+    const existingPosts = getPosts().filter(p => p.site_id === site.id).map(p => p.title);
+    updateProgress(genId, "Topic Selection", "AI is picking a unique topic...");
+
+    // Generate the blog post
+    const post = await aiRequest(`You are an expert SEO blog writer. Generate a complete blog post for this website.
+
+WEBSITE: ${site.domain}
+COMPANY: ${site.name}
+NICHE: ${site.niche}
+TONE: ${site.tone}
+BRAND VOICE: ${site.brand_voice}
+CONTENT STYLE: ${site.content_style}
+TARGET KEYWORDS: ${(site.target_keywords || []).join(", ")}
+
+HOMEPAGE CONTENT (for context):
+${homepageText}
+
+EXISTING BLOG POSTS (for style reference, DO NOT repeat these topics):
+${blogSamples.map((s, i) => "--- Post " + (i + 1) + " ---\n" + s).join("\n\n")}
+
+ALREADY PUBLISHED TITLES (DO NOT repeat):
+${existingPosts.join("\n")}
+
+Write a ~1500 word SEO-optimized blog post. Pick a topic relevant to the business niche that hasn't been covered yet.
+
+Respond in this exact JSON format:
+{
+  "title": "Blog post title (60 chars max, include primary keyword)",
+  "slug": "url-friendly-slug",
+  "metaTitle": "SEO meta title (60 chars max)",
+  "metaDescription": "SEO meta description (155 chars max)",
+  "excerpt": "2-3 sentence excerpt for previews",
+  "category": "Main category",
+  "tags": ["tag1", "tag2", "tag3"],
+  "content": "Full blog post in markdown format with ## headings, bullet points, and a conclusion. ~1500 words.",
+  "imagePrompt": "A detailed prompt for generating a hero image for this post",
+  "socialSnippets": {
+    "linkedin": "LinkedIn post to promote this article (2-3 sentences)",
+    "twitter": "Tweet to promote this article (under 280 chars)"
+  },
+  "faq": [
+    {"question": "FAQ question 1", "answer": "Answer 1"},
+    {"question": "FAQ question 2", "answer": "Answer 2"},
+    {"question": "FAQ question 3", "answer": "Answer 3"}
+  ]
+}`);
+
+    updateProgress(genId, "Post Generated", "\"" + (post.title || "Untitled") + "\"");
+
+    // Save the post
+    const postId = crypto.randomUUID();
+    let status = "pending_review";
+    let publishedUrl = "";
+
+    // Auto-publish if site is auto-approved and has an API endpoint
+    if (site.auto_approved && site.publish_endpoint) {
+      updateProgress(genId, "Publishing", "Sending to blog API...");
+      const payload = {
+        title: post.title, slug: post.slug, metaTitle: post.metaTitle,
+        metaDescription: post.metaDescription, excerpt: post.excerpt,
+        content: post.content, category: post.category, tags: post.tags,
+        date: new Date().toISOString().split("T")[0],
+        imagePrompt: post.imagePrompt, status: "published"
+      };
+      try {
+        const r = await publishToApi(site.publish_endpoint, site.publish_api_key, payload);
+        if (r.success) {
+          status = "published";
+          publishedUrl = r.url || site.domain + "/blog/" + post.slug;
+          updateProgress(genId, "Published", "Live at " + publishedUrl);
+        } else {
+          updateProgress(genId, "Publish Failed", r.error + " — saved for review");
+        }
+      } catch {}
+    } else if (site.auto_approved) {
+      status = "published";
+      publishedUrl = site.domain + "/blog/" + post.slug;
+    }
+
+    const posts = getPosts();
+    posts.push({
+      id: postId, site_id: site.id, title: post.title, slug: post.slug,
+      meta_title: post.metaTitle, meta_description: post.metaDescription,
+      excerpt: post.excerpt, category: post.category,
+      tags: post.tags || [], content: post.content,
+      image_prompt: post.imagePrompt,
+      social_linkedin: (post.socialSnippets || {}).linkedin || "",
+      social_twitter: (post.socialSnippets || {}).twitter || "",
+      faq: post.faq || [],
+      status, published_url: publishedUrl,
+      generated_at: new Date().toISOString(),
+    });
+    savePosts(posts);
+
+    updateProgress(genId, "Complete", status === "published" ? "Published successfully!" : "Ready for review");
+    analysisProgress[genId].status = "done";
+    analysisProgress[genId].postUrl = "/posts/" + postId;
+
+  } catch (err) {
+    console.error("Generation failed:", err.message);
+    updateProgress(genId, "Error", "Generation failed: " + err.message);
+    analysisProgress[genId].status = "done";
+    analysisProgress[genId].postUrl = "/posts";
+  }
+});
+
+// Generation progress API
+app.get("/api/sites/:id/generate-progress", (req, res) => {
+  const genId = "gen-" + req.params.id;
+  const progress = analysisProgress[genId];
+  if (progress) return res.json(progress);
+  res.json({ steps: [], status: "analyzing" });
 });
 
 app.post("/sites/:id/delete", (req, res) => {
