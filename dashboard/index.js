@@ -183,20 +183,21 @@ async function analyzeWebsite(domain) {
     try { blogSamples.push(htmlToText(await fetchUrl(link)).substring(0, 2000)); } catch {}
   }
 
-  if (!GEMINI_API_KEY) {
-    return {
-      name: title || new URL(domain).hostname.replace("www.", "").split(".")[0],
-      niche: description || "General",
-      tone: "professional and modern",
-      target_keywords: [],
-      blog_path: blogPath,
-      brand_voice: "Professional",
-      content_style: "Standard blog format",
-    };
-  }
+  const fallback = {
+    name: title || new URL(domain).hostname.replace("www.", "").split(".")[0],
+    niche: description || "General",
+    tone: "professional and modern",
+    target_keywords: [],
+    blog_path: blogPath,
+    brand_voice: "Professional",
+    content_style: "Standard blog format",
+  };
+
+  if (!GEMINI_API_KEY) return fallback;
 
   // Ask Gemini to analyze
-  const analysis = await geminiRequest(`Analyze this website and tell me about it. Study the homepage content and any blog posts to understand the business.
+  try {
+    const analysis = await geminiRequest(`Analyze this website and tell me about it. Study the homepage content and any blog posts to understand the business.
 
 WEBSITE: ${domain}
 PAGE TITLE: ${title}
@@ -217,11 +218,11 @@ Respond in this exact JSON format:
   "brand_voice": "Describe the brand personality and voice in one sentence",
   "content_style": "How articles are structured - paragraph length, heading patterns, use of lists"
 }`);
-
-  return {
-    ...analysis,
-    blog_path: blogPath,
-  };
+    return { ...analysis, blog_path: blogPath };
+  } catch (err) {
+    console.error("Gemini analysis failed, using fallback:", err.message);
+    return fallback;
+  }
 }
 
 // ---------------------------------------------------------------------------
