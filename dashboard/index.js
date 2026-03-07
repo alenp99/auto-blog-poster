@@ -184,19 +184,38 @@ function markdownToHtml(md) {
 }
 
 // ---------------------------------------------------------------------------
-// Crawl & analyze a website with Gemini
+// Analysis progress tracking (in-memory, keyed by site id)
 // ---------------------------------------------------------------------------
-async function analyzeWebsite(domain) {
+const analysisProgress = {};
+
+function updateProgress(siteId, step, detail) {
+  if (!analysisProgress[siteId]) analysisProgress[siteId] = { steps: [], status: "analyzing" };
+  analysisProgress[siteId].steps.push({ step, detail, time: new Date().toISOString() });
+  analysisProgress[siteId].currentStep = step;
+  console.log(`[${siteId}] ${step}: ${detail}`);
+}
+
+function completeProgress(siteId) {
+  if (analysisProgress[siteId]) analysisProgress[siteId].status = "done";
+}
+
+// ---------------------------------------------------------------------------
+// Crawl & analyze a website with AI
+// ---------------------------------------------------------------------------
+async function analyzeWebsite(domain, siteId) {
   console.log("Analyzing " + domain + "...");
 
+  updateProgress(siteId, "Connecting", "Fetching homepage...");
   let homepageHtml = "";
   try { homepageHtml = await fetchUrl(domain); } catch (e) { console.error("Fetch failed:", e.message); }
+  updateProgress(siteId, "Homepage", "Crawled homepage (" + Math.round(homepageHtml.length / 1024) + " KB)");
 
   const title = extractTitle(homepageHtml);
   const description = extractMetaDescription(homepageHtml);
   const homepageText = htmlToText(homepageHtml).substring(0, 5000);
 
   // Try to find blog
+  updateProgress(siteId, "Blog Discovery", "Looking for blog section...");
   let blogHtml = "";
   let blogPath = "/blog";
   for (const tryPath of ["/blog", "/blogs", "/articles", "/news", "/resources"]) {
@@ -205,6 +224,7 @@ async function analyzeWebsite(domain) {
       if (blogHtml.length > 500) { blogPath = tryPath; break; }
     } catch {}
   }
+  updateProgress(siteId, "Blog Found", "Found blog at " + blogPath);
 
   // Extract blog post links
   const linkRegex = /<a[^>]*href="([^"]*)"[^>]*>/gi;
@@ -220,10 +240,12 @@ async function analyzeWebsite(domain) {
   const uniqueBlogLinks = [...new Set(blogLinks)].slice(0, 3);
 
   // Fetch sample blog posts
+  updateProgress(siteId, "Reading Posts", "Fetching " + uniqueBlogLinks.length + " sample blog posts...");
   const blogSamples = [];
   for (const link of uniqueBlogLinks) {
     try { blogSamples.push(htmlToText(await fetchUrl(link)).substring(0, 2000)); } catch {}
   }
+  if (blogSamples.length > 0) updateProgress(siteId, "Posts Read", "Read " + blogSamples.length + " blog posts");
 
   const fallback = {
     name: title || new URL(domain).hostname.replace("www.", "").split(".")[0],
@@ -235,9 +257,14 @@ async function analyzeWebsite(domain) {
     content_style: "Standard blog format",
   };
 
-  if (!OPENAI_API_KEY && !GEMINI_API_KEY) return fallback;
+  if (!OPENAI_API_KEY && !GEMINI_API_KEY) {
+    updateProgress(siteId, "Complete", "No AI key — used basic crawl data");
+    completeProgress(siteId);
+    return fallback;
+  }
 
   // Ask AI to analyze
+  updateProgress(siteId, "AI Analysis", "Sending data to AI for deep analysis...");
   try {
     const analysis = await aiRequest(`Analyze this website and tell me about it. Study the homepage content and any blog posts to understand the business.
 
@@ -260,9 +287,13 @@ Respond in this exact JSON format:
   "brand_voice": "Describe the brand personality and voice in one sentence",
   "content_style": "How articles are structured - paragraph length, heading patterns, use of lists"
 }`);
+    updateProgress(siteId, "Complete", "AI analysis finished — " + (analysis.name || "site") + " identified");
+    completeProgress(siteId);
     return { ...analysis, blog_path: blogPath };
   } catch (err) {
     console.error("AI analysis failed, using fallback:", err.message);
+    updateProgress(siteId, "Complete", "AI unavailable — used basic crawl data");
+    completeProgress(siteId);
     return fallback;
   }
 }
@@ -408,12 +439,12 @@ app.post("/sites", async (req, res) => {
   });
   saveSites(sites);
 
-  // Redirect immediately — analysis happens in background
-  res.redirect("/sites");
+  // Redirect to progress page — analysis happens in background
+  res.redirect("/sites/" + id + "/progress");
 
   // Crawl and analyze in background
   try {
-    const analysis = await analyzeWebsite(domain);
+    const analysis = await analyzeWebsite(domain, id);
     const updatedSites = getSites();
     const idx = updatedSites.findIndex(s => s.id === id);
     if (idx !== -1) {
@@ -444,6 +475,78 @@ app.post("/sites", async (req, res) => {
       saveSites(updatedSites);
     }
   }
+});
+
+// Progress page — live updates while analyzing
+app.get("/sites/:id/progress", (req, res) => {
+  const site = getSites().find(s => s.id === req.params.id);
+  if (!site) return res.status(404).send(render("Not Found", "<h1>Site not found</h1>"));
+
+  // If already done, redirect to settings
+  if (site.status === "ready") return res.redirect("/sites/" + site.id);
+
+  res.send(render("Analyzing " + esc(site.domain), `
+    <div class="form-page" style="text-align:center">
+      <div class="progress-icon">
+        <svg width="64" height="64" viewBox="0 0 64 64" style="animation:spin 2s linear infinite">
+          <circle cx="32" cy="32" r="28" stroke="var(--border)" stroke-width="4" fill="none"/>
+          <arc cx="32" cy="32" r="28" stroke="var(--primary)" stroke-width="4" fill="none"/>
+          <path d="M32 4 A28 28 0 0 1 60 32" stroke="var(--primary)" stroke-width="4" fill="none" stroke-linecap="round"/>
+        </svg>
+      </div>
+      <h1 style="margin-top:1.5rem">Analyzing Website</h1>
+      <p class="domain" style="margin-bottom:2rem"><a href="${esc(site.domain)}" target="_blank">${esc(site.domain)}</a></p>
+      <div id="steps" class="progress-steps"></div>
+      <p id="status-text" class="form-description" style="margin-top:1.5rem">Starting analysis...</p>
+    </div>
+    <style>
+      @keyframes spin { to { transform: rotate(360deg); } }
+      .progress-steps { text-align: left; max-width: 400px; margin: 0 auto; }
+      .step { padding: 0.6rem 1rem; margin: 0.4rem 0; border-radius: 8px; background: var(--surface); border: 1px solid var(--border); display: flex; align-items: center; gap: 0.75rem; font-size: 0.9rem; }
+      .step .check { color: var(--success); font-weight: bold; }
+      .step .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--primary); animation: pulse 1s infinite; }
+      .step .detail { color: var(--text-muted); font-size: 0.8rem; margin-left: auto; }
+    </style>
+    <script>
+      const siteId = "${req.params.id}";
+      let lastCount = 0;
+      async function poll() {
+        try {
+          const res = await fetch("/api/sites/" + siteId + "/progress");
+          const data = await res.json();
+          const el = document.getElementById("steps");
+          const statusEl = document.getElementById("status-text");
+          if (data.steps && data.steps.length > 0) {
+            el.innerHTML = data.steps.map((s, i) => {
+              const isLast = i === data.steps.length - 1 && data.status !== "done";
+              return '<div class="step">' +
+                (isLast ? '<span class="dot"></span>' : '<span class="check">&#10003;</span>') +
+                '<span>' + s.step + '</span>' +
+                '<span class="detail">' + s.detail + '</span></div>';
+            }).join("");
+            statusEl.textContent = data.steps[data.steps.length - 1].detail;
+          }
+          if (data.status === "done") {
+            statusEl.innerHTML = 'Analysis complete! <a href="/sites/${req.params.id}">View results</a>';
+            setTimeout(() => { window.location.href = "/sites/${req.params.id}"; }, 1500);
+            return;
+          }
+        } catch {}
+        setTimeout(poll, 1000);
+      }
+      poll();
+    </script>
+  `));
+});
+
+// Progress API
+app.get("/api/sites/:id/progress", (req, res) => {
+  const progress = analysisProgress[req.params.id];
+  if (progress) return res.json(progress);
+  // Check if site is already ready
+  const site = getSites().find(s => s.id === req.params.id);
+  if (site && site.status === "ready") return res.json({ steps: [{ step: "Complete", detail: "Analysis finished" }], status: "done" });
+  res.json({ steps: [], status: "analyzing" });
 });
 
 app.get("/sites/:id", (req, res) => {
@@ -504,10 +607,10 @@ app.post("/sites/:id/rescan", async (req, res) => {
   if (idx === -1) return res.status(404).send("Not found");
   sites[idx].status = "analyzing";
   saveSites(sites);
-  res.redirect("/sites");
+  res.redirect("/sites/" + req.params.id + "/progress");
 
   try {
-    const analysis = await analyzeWebsite(sites[idx].domain);
+    const analysis = await analyzeWebsite(sites[idx].domain, req.params.id);
     const updated = getSites();
     const i = updated.findIndex(s => s.id === req.params.id);
     if (i !== -1) {
