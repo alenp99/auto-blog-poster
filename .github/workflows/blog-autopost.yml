@@ -1,11 +1,9 @@
 name: Auto Blog Publisher
 
 on:
-  # Triggered by n8n via GitHub API repository dispatch
   repository_dispatch:
     types: [generate-blog]
 
-  # Manual trigger from GitHub UI
   workflow_dispatch:
     inputs:
       site_filter:
@@ -35,9 +33,11 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Generate blog posts
+      - name: Generate and publish blog posts
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          SYNTHERA_BLOG_API_KEY: ${{ secrets.SYNTHERA_BLOG_API_KEY }}
+          TECHFUTURE_BLOG_API_KEY: ${{ secrets.TECHFUTURE_BLOG_API_KEY }}
           TRIGGER_SOURCE: ${{ github.event_name }}
         run: npx ts-node scripts/generate_and_publish_blog.ts
 

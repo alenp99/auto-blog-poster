@@ -6,6 +6,10 @@
 
     "content_mode": "mdx",
     "content_path": "content/blog",
+    "blog_path": "/blog",
+
+    "publish_endpoint": "https://www.synthera.com.au/api/blog/create",
+    "publish_api_key": "SYNTHERA_BLOG_API_KEY",
 
     "niche": "AI automation, SaaS platforms, AI agents",
     "tone": "professional and modern",
@@ -19,7 +23,7 @@
     "post_length": 1500,
 
     "auto_publish": true,
-    "publish_method": "git_commit"
+    "publish_method": "api"
   },
 
   {
@@ -28,7 +32,10 @@
     "platform": "nextjs",
 
     "content_mode": "api",
+    "blog_path": "/blog",
+
     "publish_endpoint": "https://techfuture.io/api/blog/create",
+    "publish_api_key": "TECHFUTURE_BLOG_API_KEY",
 
     "niche": "future technology, AI tools, startups",
     "tone": "informative and engaging",
