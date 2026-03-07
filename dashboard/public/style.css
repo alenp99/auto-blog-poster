@@ -134,6 +134,13 @@ h2 { font-size: 1.3rem; margin-bottom: 1rem; color: var(--text-muted); }
 .badge-rejected { background: rgba(239, 68, 68, 0.15); color: var(--danger); }
 .badge-auto { background: rgba(99, 102, 241, 0.15); color: var(--primary); }
 .badge-review { background: rgba(245, 158, 11, 0.15); color: var(--warning); }
+.badge-analyzing { background: rgba(99, 102, 241, 0.15); color: var(--primary); animation: pulse 2s infinite; }
+.badge-ready { background: rgba(34, 197, 94, 0.15); color: var(--success); }
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
 
 .site-tag {
   font-size: 0.8rem;
@@ -384,6 +391,44 @@ h2 { font-size: 1.3rem; margin-bottom: 1rem; color: var(--text-muted); }
   background: var(--surface);
   border: 1px dashed var(--border);
   border-radius: var(--radius);
+}
+
+.form-description {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  margin-bottom: 1.5rem;
+}
+
+.detected-info {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.25rem;
+  margin-top: 1rem;
+}
+
+.detected-info h4 {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 0.75rem;
+}
+
+.detected-info dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.5rem 1rem;
+}
+
+.detected-info dt {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.detected-info dd {
+  font-size: 0.9rem;
 }
 
 /* Responsive */
