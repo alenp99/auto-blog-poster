@@ -25,6 +25,10 @@ try {
 console.log("Data directory: " + DATA_DIR);
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 
+// Images directory for permanent storage of generated images
+const IMAGES_DIR = path.join(DATA_DIR, "images");
+if (!fs.existsSync(IMAGES_DIR)) fs.mkdirSync(IMAGES_DIR, { recursive: true });
+
 const SITES_FILE = path.join(DATA_DIR, "sites.json");
 const POSTS_FILE = path.join(DATA_DIR, "posts.json");
 
@@ -44,6 +48,7 @@ function savePosts(posts) { writeJson(POSTS_FILE, posts); }
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, "public")));
+app.use("/stored-images", express.static(IMAGES_DIR));
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -256,6 +261,42 @@ function openaiImageGenerate(prompt) {
     req.write(body);
     req.end();
   });
+}
+
+// Download an image from a URL and save it to the persistent images directory.
+// Returns the filename so it can be served permanently via /stored-images/.
+function downloadAndStoreImage(imageUrl) {
+  return new Promise((resolve, reject) => {
+    const filename = crypto.randomUUID() + ".png";
+    const filepath = path.join(IMAGES_DIR, filename);
+    const client = imageUrl.startsWith("https") ? https : http;
+
+    const doDownload = (url) => {
+      const c = url.startsWith("https") ? https : http;
+      c.get(url, { timeout: 30000 }, (res) => {
+        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+          doDownload(res.headers.location);
+          return;
+        }
+        if (res.statusCode !== 200) {
+          return reject(new Error("Image download failed: HTTP " + res.statusCode));
+        }
+        const file = fs.createWriteStream(filepath);
+        res.pipe(file);
+        file.on("finish", () => { file.close(); resolve(filename); });
+        file.on("error", (e) => { fs.unlink(filepath, () => {}); reject(e); });
+      }).on("error", reject);
+    };
+    doDownload(imageUrl);
+  });
+}
+
+// Build permanent image URL from filename
+function getStoredImageUrl(filename) {
+  const baseUrl = process.env.RAILWAY_PUBLIC_DOMAIN
+    ? "https://" + process.env.RAILWAY_PUBLIC_DOMAIN
+    : "http://localhost:" + PORT;
+  return baseUrl + "/stored-images/" + filename;
 }
 
 // ---------------------------------------------------------------------------
@@ -902,12 +943,15 @@ Respond in this exact JSON format:
 
     updateProgress(genId, "Post Generated", "\"" + (post.title || "Untitled") + "\"");
 
-    // Generate hero image
+    // Generate hero image and store permanently
     let imageUrl = "";
     updateProgress(genId, "Generating Image", "Creating hero image with DALL-E...");
     try {
-      imageUrl = await openaiImageGenerate(post.imagePrompt || post.title);
-      updateProgress(genId, "Image Ready", "Hero image generated");
+      const dalleUrl = await openaiImageGenerate(post.imagePrompt || post.title);
+      updateProgress(genId, "Saving Image", "Downloading image for permanent storage...");
+      const filename = await downloadAndStoreImage(dalleUrl);
+      imageUrl = getStoredImageUrl(filename);
+      updateProgress(genId, "Image Ready", "Hero image generated and stored permanently");
     } catch (err) {
       console.error("Image generation failed:", err.message);
       // Fallback to Unsplash
@@ -1241,10 +1285,12 @@ Respond in this exact JSON format:
 
       updateProgress(genId, "Post Generated", post.title);
 
-      // Generate image
+      // Generate image and store permanently
       let imageUrl = "";
       try {
-        imageUrl = await openaiImageGenerate(post.imagePrompt || post.title);
+        const dalleUrl = await openaiImageGenerate(post.imagePrompt || post.title);
+        const filename = await downloadAndStoreImage(dalleUrl);
+        imageUrl = getStoredImageUrl(filename);
       } catch {
         const keywords = (site.target_keywords || []).length > 0 ? site.target_keywords : [site.niche || "technology"];
         imageUrl = generateImageUrl(keywords);
