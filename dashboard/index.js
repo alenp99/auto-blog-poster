@@ -14,8 +14,15 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
 // ---------------------------------------------------------------------------
 // JSON file database
 // ---------------------------------------------------------------------------
-// Use /data (Railway persistent volume) if it exists, otherwise local
-const DATA_DIR = fs.existsSync("/data") ? "/data" : path.join(__dirname, "data");
+// Use /data (Railway persistent volume) if writable, otherwise local
+let DATA_DIR = path.join(__dirname, "data");
+try {
+  if (fs.existsSync("/data")) {
+    fs.accessSync("/data", fs.constants.W_OK);
+    DATA_DIR = "/data";
+  }
+} catch {}
+console.log("Data directory: " + DATA_DIR);
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 
 const SITES_FILE = path.join(DATA_DIR, "sites.json");
@@ -1110,6 +1117,8 @@ app.post("/posts/:id/reject", (req, res) => {
 // ---------------------------------------------------------------------------
 // API endpoints (used by generation script)
 // ---------------------------------------------------------------------------
+app.get("/api/version", (req, res) => { res.json({ version: "2.0.0", hasGenerate: true }); });
+
 app.get("/api/sites", (req, res) => {
   res.json(getSites().filter(s => s.status === "ready"));
 });
@@ -1289,5 +1298,8 @@ Respond in this exact JSON format:
 // Start
 // ---------------------------------------------------------------------------
 app.listen(PORT, "0.0.0.0", () => {
-  console.log("Dashboard running on http://0.0.0.0:" + PORT);
+  console.log("Dashboard v2.0 running on http://0.0.0.0:" + PORT);
 });
+
+process.on("uncaughtException", (err) => { console.error("UNCAUGHT:", err); });
+process.on("unhandledRejection", (err) => { console.error("UNHANDLED:", err); });
