@@ -1148,6 +1148,143 @@ app.post("/api/posts", async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
+// API: Trigger generation for all sites (called by n8n / GitHub Actions)
+// ---------------------------------------------------------------------------
+app.post("/api/generate", async (req, res) => {
+  const sites = getSites().filter(s => s.status === "ready");
+  if (sites.length === 0) return res.json({ message: "No sites configured", results: [] });
+
+  console.log("=== Auto Generate triggered for " + sites.length + " site(s) ===");
+  res.json({ message: "Generation started for " + sites.length + " site(s)", sites: sites.map(s => s.name) });
+
+  // Run generation in background for each site
+  for (const site of sites) {
+    const genId = "gen-" + site.id;
+    analysisProgress[genId] = { steps: [], status: "analyzing" };
+
+    try {
+      updateProgress(genId, "Crawling", "Fetching latest content from " + site.domain + "...");
+      let homepageText = "";
+      try {
+        const html = await fetchUrl(site.domain);
+        homepageText = htmlToText(html).substring(0, 3000);
+      } catch {}
+
+      let blogSamples = [];
+      const blogUrl = site.domain.replace(/\/$/, "") + (site.blog_path || "/blog");
+      try {
+        const blogHtml = await fetchUrl(blogUrl);
+        const linkRegex = /<a[^>]*href="([^"]*)"[^>]*>/gi;
+        const links = [];
+        let m;
+        while ((m = linkRegex.exec(blogHtml)) !== null) {
+          let href = m[1];
+          if (href.startsWith("/")) href = site.domain.replace(/\/$/, "") + href;
+          if (href.startsWith(site.domain) && href.includes((site.blog_path || "/blog") + "/")) links.push(href);
+        }
+        for (const link of [...new Set(links)].slice(0, 3)) {
+          try { blogSamples.push(htmlToText(await fetchUrl(link)).substring(0, 1500)); } catch {}
+        }
+      } catch {}
+      updateProgress(genId, "Content Gathered", "Read homepage + " + blogSamples.length + " blog posts");
+
+      const existingPosts = getPosts().filter(p => p.site_id === site.id).map(p => p.title);
+      updateProgress(genId, "Generating", "AI is writing a blog post...");
+
+      const post = await aiRequest(`You are an expert SEO blog writer. Generate a complete blog post for this website.
+
+WEBSITE: ${site.domain}
+COMPANY: ${site.name}
+NICHE: ${site.niche}
+TONE: ${site.tone}
+BRAND VOICE: ${site.brand_voice}
+CONTENT STYLE: ${site.content_style}
+TARGET KEYWORDS: ${(site.target_keywords || []).join(", ")}
+
+HOMEPAGE CONTENT (for context):
+${homepageText}
+
+EXISTING BLOG POSTS (for style reference, DO NOT repeat these topics):
+${blogSamples.map((s, i) => "--- Post " + (i + 1) + " ---\n" + s).join("\n\n")}
+
+ALREADY PUBLISHED TITLES (DO NOT repeat any of these — pick a COMPLETELY DIFFERENT topic):
+${existingPosts.join("\n")}
+
+Write a ~1500 word SEO-optimized blog post. Pick a topic relevant to the business niche that is COMPLETELY DIFFERENT from previously published titles.
+
+Respond in this exact JSON format:
+{
+  "title": "Blog post title (60 chars max, include primary keyword)",
+  "slug": "url-friendly-slug",
+  "metaTitle": "SEO meta title (60 chars max)",
+  "metaDescription": "SEO meta description (155 chars max)",
+  "excerpt": "2-3 sentence excerpt for previews",
+  "category": "Main category",
+  "tags": ["tag1", "tag2", "tag3"],
+  "content": "Full blog post in markdown format with ## headings, bullet points, and a conclusion. ~1500 words.",
+  "imagePrompt": "A detailed prompt for generating a hero image for this post",
+  "socialSnippets": {
+    "linkedin": "LinkedIn post to promote this article (2-3 sentences)",
+    "twitter": "Tweet to promote this article (under 280 chars)"
+  }
+}`);
+
+      updateProgress(genId, "Post Generated", post.title);
+
+      // Generate image
+      let imageUrl = "";
+      try {
+        imageUrl = await openaiImageGenerate(post.imagePrompt || post.title);
+      } catch {
+        const keywords = (site.target_keywords || []).length > 0 ? site.target_keywords : [site.niche || "technology"];
+        imageUrl = generateImageUrl(keywords);
+      }
+
+      const htmlContent = markdownToHtml(post.content);
+      const postId = crypto.randomUUID();
+      let status = "pending_review";
+      let publishedUrl = "";
+
+      if (site.auto_approved && site.publish_endpoint) {
+        const payload = {
+          title: post.title, slug: post.slug, excerpt: post.excerpt,
+          content: htmlContent, image_url: imageUrl, author_name: site.name + " Team"
+        };
+        try {
+          const r = await publishToApi(site.publish_endpoint, site.publish_api_key, payload);
+          if (r.success) {
+            status = "published";
+            publishedUrl = r.url || (site.domain.replace(/\/$/, "") + (site.blog_path || "/blog") + "/" + (r.slug || post.slug));
+          }
+        } catch {}
+      }
+
+      const posts = getPosts();
+      posts.push({
+        id: postId, site_id: site.id, title: post.title, slug: post.slug,
+        meta_title: post.metaTitle, meta_description: post.metaDescription,
+        excerpt: post.excerpt, category: post.category,
+        tags: post.tags || [], content: post.content,
+        html_content: htmlContent, image_url: imageUrl,
+        image_prompt: post.imagePrompt,
+        social_linkedin: (post.socialSnippets || {}).linkedin || "",
+        social_twitter: (post.socialSnippets || {}).twitter || "",
+        status, published_url: publishedUrl,
+        generated_at: new Date().toISOString(),
+      });
+      savePosts(posts);
+
+      console.log("[Auto] " + site.name + ": " + post.title + " — " + status);
+      analysisProgress[genId].status = "done";
+
+    } catch (err) {
+      console.error("[Auto] " + site.name + " failed:", err.message);
+      analysisProgress[genId].status = "done";
+    }
+  }
+});
+
+// ---------------------------------------------------------------------------
 // Start
 // ---------------------------------------------------------------------------
 app.listen(PORT, "0.0.0.0", () => {

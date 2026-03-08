@@ -1,56 +1,39 @@
 name: Auto Blog Publisher
 
 on:
+  # Every 4 days at 8 AM Sydney time (UTC+11 = 9 PM UTC previous day)
+  # Runs on the 1st, 5th, 9th, 13th, 17th, 21st, 25th, 29th of each month
+  schedule:
+    - cron: "0 21 1,5,9,13,17,21,25,29 * *"
+
   repository_dispatch:
     types: [generate-blog]
 
   workflow_dispatch:
-    inputs:
-      site_filter:
-        description: "Optional: only generate for a specific site name"
-        required: false
-        type: string
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   publish-blog:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 10
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-
-      - name: Install dependencies
-        run: npm install
-
-      - name: Generate and publish blog posts
+      - name: Trigger blog generation on dashboard
         env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           DASHBOARD_URL: ${{ secrets.DASHBOARD_URL }}
-          SYNTHERA_BLOG_API_KEY: ${{ secrets.SYNTHERA_BLOG_API_KEY }}
-          TECHFUTURE_BLOG_API_KEY: ${{ secrets.TECHFUTURE_BLOG_API_KEY }}
-          TRIGGER_SOURCE: ${{ github.event_name }}
-        run: npx ts-node scripts/generate_and_publish_blog.ts
-
-      - name: Save run log
-        env:
-          TRIGGER_SOURCE: ${{ github.event_name }}
-        run: npx ts-node scripts/save_run_log.ts
-
-      - name: Commit cache and content updates
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add .claude/cache/ content/ output/
-          git diff --cached --quiet || git commit -m "chore: auto-publish blog posts [$(date -u +%Y-%m-%d)]"
-          git push
+          echo "Triggering blog generation at $DASHBOARD_URL/api/generate"
+          RESPONSE=$(curl -s -w "\nHTTP_STATUS:%{http_code}" -X POST "$DASHBOARD_URL/api/generate" \
+            -H "Content-Type: application/json")
+          HTTP_STATUS=$(echo "$RESPONSE" | grep "HTTP_STATUS:" | cut -d: -f2)
+          BODY=$(echo "$RESPONSE" | sed '/HTTP_STATUS:/d')
+          echo "Response: $BODY"
+          echo "Status: $HTTP_STATUS"
+          if [ "$HTTP_STATUS" -ge 200 ] && [ "$HTTP_STATUS" -lt 300 ]; then
+            echo "Generation triggered successfully"
+          else
+            echo "Failed to trigger generation"
+            exit 1
+          fi
