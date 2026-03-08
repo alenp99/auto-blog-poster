@@ -13,7 +13,8 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
 // ---------------------------------------------------------------------------
 // JSON file database
 // ---------------------------------------------------------------------------
-const DATA_DIR = path.join(__dirname, "data");
+// Use /data (Railway persistent volume) if it exists, otherwise local
+const DATA_DIR = fs.existsSync("/data") ? "/data" : path.join(__dirname, "data");
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 
 const SITES_FILE = path.join(DATA_DIR, "sites.json");
