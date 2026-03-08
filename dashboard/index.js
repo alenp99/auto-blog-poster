@@ -6,6 +6,7 @@ const https = require("https");
 const http = require("http");
 
 const app = express();
+// v2 - with /api/generate endpoint
 const PORT = process.env.PORT || 3000;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
