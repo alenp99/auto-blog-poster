@@ -1217,6 +1217,28 @@ app.post("/api/fix-images", async (req, res) => {
   res.json({ fixed, total: posts.length });
 });
 
+// Force re-publish stored image URLs to the target site via PUT
+app.post("/api/republish-images", async (req, res) => {
+  const posts = getPosts();
+  const sites = getSites();
+  const results = [];
+  for (const post of posts) {
+    if (!post.image_url || !post.image_url.includes("/stored-images/")) continue;
+    if (post.status !== "published") continue;
+    const site = sites.find(s => s.id === post.site_id);
+    if (!site || !site.publish_endpoint) continue;
+    const putEndpoint = site.publish_endpoint.replace(/\/?$/, "/") + post.slug;
+    const payload = { image_url: post.image_url };
+    try {
+      const r = await publishToApi(putEndpoint, site.publish_api_key, payload, "PUT");
+      results.push({ title: post.title, slug: post.slug, success: r.success, error: r.error || null });
+    } catch (e) {
+      results.push({ title: post.title, slug: post.slug, success: false, error: e.message });
+    }
+  }
+  res.json({ updated: results.filter(r => r.success).length, results });
+});
+
 app.get("/api/sites", (req, res) => {
   res.json(getSites().filter(s => s.status === "ready"));
 });
