@@ -292,10 +292,19 @@ function downloadAndStoreImage(imageUrl) {
 }
 
 // Build permanent image URL from filename
-function getStoredImageUrl(filename) {
-  const baseUrl = process.env.RAILWAY_PUBLIC_DOMAIN
-    ? "https://" + process.env.RAILWAY_PUBLIC_DOMAIN
-    : "http://localhost:" + PORT;
+// reqOrNull can be an Express request object to derive the host from headers
+function getStoredImageUrl(filename, reqOrNull) {
+  let baseUrl = "";
+  if (process.env.RAILWAY_PUBLIC_DOMAIN) {
+    baseUrl = "https://" + process.env.RAILWAY_PUBLIC_DOMAIN;
+  } else if (process.env.RAILWAY_STATIC_URL) {
+    baseUrl = "https://" + process.env.RAILWAY_STATIC_URL;
+  } else if (reqOrNull && reqOrNull.headers && reqOrNull.headers.host) {
+    const proto = reqOrNull.headers["x-forwarded-proto"] || "https";
+    baseUrl = proto + "://" + reqOrNull.headers.host;
+  } else {
+    baseUrl = "https://blog-dashboard-production-d31d.up.railway.app";
+  }
   return baseUrl + "/stored-images/" + filename;
 }
 
@@ -1162,6 +1171,42 @@ app.post("/posts/:id/reject", (req, res) => {
 // API endpoints (used by generation script)
 // ---------------------------------------------------------------------------
 app.get("/api/version", (req, res) => { res.json({ version: "2.0.0", hasGenerate: true }); });
+
+// Regenerate images for all posts that have expired DALL-E URLs
+app.post("/api/fix-images", async (req, res) => {
+  const posts = getPosts();
+  const sites = getSites();
+  let fixed = 0;
+  for (let i = 0; i < posts.length; i++) {
+    const post = posts[i];
+    // Skip if already using stored image or no image prompt
+    if (post.image_url && post.image_url.includes("/stored-images/")) continue;
+    if (!post.image_prompt && !post.title) continue;
+
+    try {
+      const dalleUrl = await openaiImageGenerate(post.image_prompt || post.title);
+      const filename = await downloadAndStoreImage(dalleUrl);
+      const permanentUrl = getStoredImageUrl(filename, req);
+      posts[i].image_url = permanentUrl;
+
+      // Also update on Synthera if published
+      const site = sites.find(s => s.id === post.site_id);
+      if (site && site.publish_endpoint && post.status === "published") {
+        const payload = {
+          title: post.title, slug: post.slug, excerpt: post.excerpt,
+          content: post.html_content || markdownToHtml(post.content),
+          image_url: permanentUrl, author_name: (site.name || "Blog") + " Team"
+        };
+        try { await publishToApi(site.publish_endpoint, site.publish_api_key, payload); } catch {}
+      }
+      fixed++;
+    } catch (err) {
+      console.error("Fix image failed for " + post.title + ":", err.message);
+    }
+  }
+  savePosts(posts);
+  res.json({ fixed, total: posts.length });
+});
 
 app.get("/api/sites", (req, res) => {
   res.json(getSites().filter(s => s.status === "ready"));
