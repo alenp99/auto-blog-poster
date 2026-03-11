@@ -167,21 +167,21 @@ function aiRequest(prompt) {
   return Promise.reject(new Error("No AI API key configured"));
 }
 
-function publishToApi(endpoint, apiKey, payload) {
+function publishToApi(endpoint, apiKey, payload, method) {
   return new Promise((resolve) => {
     const url = new URL(endpoint);
     const client = url.protocol === "https:" ? https : http;
     const body = JSON.stringify(payload);
     const headers = { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body) };
     if (apiKey) headers["Authorization"] = "Bearer " + apiKey;
-    const req = client.request({ hostname: url.hostname, port: url.port, path: url.pathname + url.search, method: "POST", headers }, (res) => {
+    const req = client.request({ hostname: url.hostname, port: url.port, path: url.pathname + url.search, method: method || "POST", headers }, (res) => {
       let data = ""; res.on("data", (c) => data += c);
       res.on("end", () => {
         if (res.statusCode >= 200 && res.statusCode < 300) {
           let postUrl = ""; let postSlug = "";
           try { const p = JSON.parse(data); postUrl = p.url || ""; postSlug = p.slug || ""; } catch {}
           resolve({ success: true, url: postUrl, slug: postSlug, raw: data });
-        } else { resolve({ success: false, error: "HTTP " + res.statusCode }); }
+        } else { resolve({ success: false, error: "HTTP " + res.statusCode + " " + data }); }
       });
     });
     req.on("error", (err) => resolve({ success: false, error: err.message }));
@@ -1189,7 +1189,7 @@ app.post("/api/fix-images", async (req, res) => {
       const permanentUrl = getStoredImageUrl(filename, req);
       posts[i].image_url = permanentUrl;
 
-      // Also update on Synthera if published
+      // Also update on Synthera if published — try PUT first (update), fall back to POST
       const site = sites.find(s => s.id === post.site_id);
       if (site && site.publish_endpoint && post.status === "published") {
         const payload = {
@@ -1197,7 +1197,16 @@ app.post("/api/fix-images", async (req, res) => {
           content: post.html_content || markdownToHtml(post.content),
           image_url: permanentUrl, author_name: (site.name || "Blog") + " Team"
         };
-        try { await publishToApi(site.publish_endpoint, site.publish_api_key, payload); } catch {}
+        try {
+          // Try PUT to update existing post by slug
+          const putEndpoint = site.publish_endpoint.replace(/\/?$/, "/") + post.slug;
+          let r = await publishToApi(putEndpoint, site.publish_api_key, payload, "PUT");
+          if (!r.success) {
+            // Fall back to POST (some APIs upsert on same slug)
+            r = await publishToApi(site.publish_endpoint, site.publish_api_key, payload);
+          }
+          console.log("[Fix Images] " + post.title + ": " + (r.success ? "updated" : r.error));
+        } catch {}
       }
       fixed++;
     } catch (err) {
