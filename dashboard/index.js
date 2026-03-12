@@ -1228,6 +1228,74 @@ app.post("/api/fix-images", async (req, res) => {
   res.json({ fixed, total: posts.length });
 });
 
+// Rewrite all published posts with simpler, more readable content and update on site
+app.post("/api/rewrite-all", async (req, res) => {
+  const posts = getPosts();
+  const sites = getSites();
+  const results = [];
+  for (let i = 0; i < posts.length; i++) {
+    const post = posts[i];
+    if (post.status !== "published") continue;
+    const site = sites.find(s => s.id === post.site_id);
+    if (!site) continue;
+
+    try {
+      const rewritten = await aiRequest(`Rewrite this blog post to be much simpler and easier to read.
+
+ORIGINAL TITLE: ${post.title}
+ORIGINAL CONTENT:
+${post.content}
+
+COMPANY: ${site.name}
+NICHE: ${site.niche}
+TONE: ${site.tone || "professional but friendly"}
+
+REWRITING RULES — VERY IMPORTANT:
+- Keep the SAME topic and key points, but make it WAY simpler.
+- Write for a normal person, NOT a technical audience. Use everyday language.
+- Keep sentences short (under 20 words). Keep paragraphs to 2-3 sentences max.
+- NO jargon or buzzwords. NO phrases like "In today's rapidly evolving landscape", "leveraging", "cutting-edge", "game-changer", "revolutionize", "transform", "unlock".
+- Be direct and practical. Give real examples and actionable tips.
+- Use ## headings to break content into 5-6 scannable sections.
+- Use bullet points for lists — keep each bullet to one short line.
+- Start with a clear hook. End with a 1-2 sentence call to action.
+- Tone: helpful friend explaining something, not a corporate whitepaper.
+- Target ~600-800 words total. Cut the fluff.
+
+Respond in JSON:
+{
+  "title": "Simpler, clearer title (60 chars max)",
+  "metaDescription": "Plain-English meta description (155 chars max)",
+  "excerpt": "1-2 sentence simple summary",
+  "content": "Rewritten blog post in markdown. ~800 words max."
+}`);
+
+      // Update post data
+      posts[i].title = rewritten.title || post.title;
+      posts[i].meta_description = rewritten.metaDescription || post.meta_description;
+      posts[i].excerpt = rewritten.excerpt || post.excerpt;
+      posts[i].content = rewritten.content || post.content;
+      posts[i].html_content = markdownToHtml(rewritten.content || post.content);
+
+      // Update on Synthera via PUT
+      if (site.publish_endpoint) {
+        const putEndpoint = site.publish_endpoint.replace(/\/?$/, "/") + post.slug;
+        const payload = {
+          title: posts[i].title, slug: post.slug, excerpt: posts[i].excerpt,
+          content: posts[i].html_content, image_url: post.image_url,
+          author_name: (site.name || "Blog") + " Team"
+        };
+        const r = await publishToApi(putEndpoint, site.publish_api_key, payload, "PUT");
+        results.push({ slug: post.slug, title: posts[i].title, success: r.success, error: r.error || null });
+      }
+    } catch (err) {
+      results.push({ slug: post.slug, title: post.title, success: false, error: err.message });
+    }
+  }
+  savePosts(posts);
+  res.json({ rewritten: results.filter(r => r.success).length, total: results.length, results });
+});
+
 // Force re-publish stored image URLs to the target site via PUT
 app.post("/api/republish-images", async (req, res) => {
   const posts = getPosts();
