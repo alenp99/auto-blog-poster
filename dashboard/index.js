@@ -922,10 +922,26 @@ ${homepageText}
 EXISTING BLOG POSTS (for style reference, DO NOT repeat these topics):
 ${blogSamples.map((s, i) => "--- Post " + (i + 1) + " ---\n" + s).join("\n\n")}
 
-ALREADY PUBLISHED TITLES (DO NOT repeat):
+ALREADY PUBLISHED TITLES (DO NOT repeat or write anything similar):
 ${existingPosts.join("\n")}
 
-Write a ~800 word blog post. Pick a topic relevant to the business niche that hasn't been covered yet.
+TOPIC DIVERSITY — CRITICAL:
+You MUST pick a topic that is genuinely DIFFERENT from the titles above. Do NOT just rephrase the same ideas.
+Think beyond the obvious. Consider these angles for variety:
+- Industry trends or news relevant to the niche
+- Common mistakes businesses make (and how to avoid them)
+- Behind-the-scenes / how things actually work
+- Cost comparisons, budgeting, or ROI discussions
+- Case study style: a specific problem and how it was solved
+- Beginner guides or "what you need to know before..."
+- Myths vs reality in the industry
+- Hiring, team building, or workflow tips related to the niche
+- Comparisons (e.g. option A vs option B)
+- Seasonal or timely topics
+
+Pick ONE angle from above (or come up with your own unique angle) that has NOT been covered yet.
+
+Write a ~800 word blog post on this fresh topic.
 
 WRITING RULES — VERY IMPORTANT:
 - Write for a normal person, NOT a technical audience. Use simple, everyday language.
@@ -938,6 +954,7 @@ WRITING RULES — VERY IMPORTANT:
 - End with a short, clear call to action (1-2 sentences).
 - The tone should feel like a helpful friend explaining something, not a corporate whitepaper.
 - DO NOT use the word "revolutionize", "transform", "leverage", "cutting-edge", "game-changer", or "unlock".
+- DO NOT start the title with "How". Vary your title formats.
 
 Respond in this exact JSON format:
 {
@@ -1416,10 +1433,26 @@ ${homepageText}
 EXISTING BLOG POSTS (for style reference, DO NOT repeat these topics):
 ${blogSamples.map((s, i) => "--- Post " + (i + 1) + " ---\n" + s).join("\n\n")}
 
-ALREADY PUBLISHED TITLES (DO NOT repeat any of these — pick a COMPLETELY DIFFERENT topic):
+ALREADY PUBLISHED TITLES (DO NOT repeat or write anything similar):
 ${existingPosts.join("\n")}
 
-Write a ~800 word blog post. Pick a topic relevant to the business niche that is COMPLETELY DIFFERENT from previously published titles.
+TOPIC DIVERSITY — CRITICAL:
+You MUST pick a topic that is genuinely DIFFERENT from the titles above. Do NOT just rephrase the same ideas.
+Think beyond the obvious. Consider these angles for variety:
+- Industry trends or news relevant to the niche
+- Common mistakes businesses make (and how to avoid them)
+- Behind-the-scenes / how things actually work
+- Cost comparisons, budgeting, or ROI discussions
+- Case study style: a specific problem and how it was solved
+- Beginner guides or "what you need to know before..."
+- Myths vs reality in the industry
+- Hiring, team building, or workflow tips related to the niche
+- Comparisons (e.g. option A vs option B)
+- Seasonal or timely topics
+
+Pick ONE angle from above (or come up with your own unique angle) that has NOT been covered yet.
+
+Write a ~800 word blog post on this fresh topic.
 
 WRITING RULES — VERY IMPORTANT:
 - Write for a normal person, NOT a technical audience. Use simple, everyday language.
@@ -1432,6 +1465,7 @@ WRITING RULES — VERY IMPORTANT:
 - End with a short, clear call to action (1-2 sentences).
 - The tone should feel like a helpful friend explaining something, not a corporate whitepaper.
 - DO NOT use the word "revolutionize", "transform", "leverage", "cutting-edge", "game-changer", or "unlock".
+- DO NOT start the title with "How". Vary your title formats.
 
 Respond in this exact JSON format:
 {
