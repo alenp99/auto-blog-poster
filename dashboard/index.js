@@ -193,29 +193,29 @@ function markdownToHtml(md) {
   if (!md) return "";
   let html = md
     .replace(/&(?!amp;|lt;|gt;|quot;)/g, "&amp;")
-    .replace(/^### (.*$)/gm, '<h3 style="font-size:1.2rem;font-weight:700;margin:2rem 0 0.75rem;color:#1a1a2e">$1</h3>')
-    .replace(/^## (.*$)/gm, '<h2 style="font-size:1.5rem;font-weight:700;margin:2.5rem 0 1rem;color:#1a1a2e;border-bottom:2px solid #eee;padding-bottom:0.5rem">$1</h2>')
-    .replace(/^# (.*$)/gm, '<h1 style="font-size:2rem;font-weight:800;margin:1rem 0 1.5rem;color:#111">$1</h1>')
+    .replace(/^### (.*$)/gm, '<h3 style="font-size:1.2rem;font-weight:700;margin:2rem 0 0.75rem">$1</h3>')
+    .replace(/^## (.*$)/gm, '<h2 style="font-size:1.5rem;font-weight:700;margin:2.5rem 0 1rem;padding-bottom:0.5rem;border-bottom:1px solid currentColor;opacity:0.9">$1</h2>')
+    .replace(/^# (.*$)/gm, '<h1 style="font-size:2rem;font-weight:800;margin:1rem 0 1.5rem">$1</h1>')
     .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>")
     .replace(/\*(.*?)\*/g, "<em>$1</em>")
-    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" style="color:#6366f1;text-decoration:underline">$1</a>');
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>');
 
-  // Handle lists
+  // Handle lists — no color styles, inherit from site
   html = html.replace(/(^- .*$(\n|$))+/gm, (block) => {
-    const items = block.trim().split("\n").map(l => '<li style="margin-bottom:0.5rem;padding-left:0.25rem">' + l.replace(/^- /, "") + "</li>").join("\n");
+    const items = block.trim().split("\n").map(l => '<li style="margin-bottom:0.5rem">' + l.replace(/^- /, "") + "</li>").join("\n");
     return '<ul style="margin:1rem 0 1.5rem 1.25rem;line-height:1.8">\n' + items + "\n</ul>\n";
   });
   html = html.replace(/(^\d+\. .*$(\n|$))+/gm, (block) => {
-    const items = block.trim().split("\n").map(l => '<li style="margin-bottom:0.5rem;padding-left:0.25rem">' + l.replace(/^\d+\. /, "") + "</li>").join("\n");
+    const items = block.trim().split("\n").map(l => '<li style="margin-bottom:0.5rem">' + l.replace(/^\d+\. /, "") + "</li>").join("\n");
     return '<ol style="margin:1rem 0 1.5rem 1.25rem;line-height:1.8">\n' + items + "\n</ol>\n";
   });
 
-  // Wrap remaining plain text lines in <p> tags with good readability
+  // Wrap remaining plain text in <p> — only spacing, no colors
   html = html.split("\n\n").map(block => {
     block = block.trim();
     if (!block) return "";
     if (block.startsWith("<h") || block.startsWith("<ul") || block.startsWith("<ol") || block.startsWith("<p")) return block;
-    return '<p style="margin-bottom:1.25rem;line-height:1.9;font-size:1.05rem;color:#333">' + block.replace(/\n/g, "<br>") + "</p>";
+    return '<p style="margin-bottom:1.25rem;line-height:1.9;font-size:1.05rem">' + block.replace(/\n/g, "<br>") + "</p>";
   }).join("\n\n");
 
   return html;
