@@ -192,31 +192,30 @@ function publishToApi(endpoint, apiKey, payload, method) {
 function markdownToHtml(md) {
   if (!md) return "";
   let html = md
-    // Don't double-escape if already HTML
     .replace(/&(?!amp;|lt;|gt;|quot;)/g, "&amp;")
-    .replace(/^### (.*$)/gm, "<h3>$1</h3>")
-    .replace(/^## (.*$)/gm, "<h2>$1</h2>")
-    .replace(/^# (.*$)/gm, "<h1>$1</h1>")
+    .replace(/^### (.*$)/gm, '<h3 style="font-size:1.2rem;font-weight:700;margin:2rem 0 0.75rem;color:#1a1a2e">$1</h3>')
+    .replace(/^## (.*$)/gm, '<h2 style="font-size:1.5rem;font-weight:700;margin:2.5rem 0 1rem;color:#1a1a2e;border-bottom:2px solid #eee;padding-bottom:0.5rem">$1</h2>')
+    .replace(/^# (.*$)/gm, '<h1 style="font-size:2rem;font-weight:800;margin:1rem 0 1.5rem;color:#111">$1</h1>')
     .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>")
     .replace(/\*(.*?)\*/g, "<em>$1</em>")
-    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>');
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" style="color:#6366f1;text-decoration:underline">$1</a>');
 
-  // Handle lists - group consecutive list items into <ul>
+  // Handle lists
   html = html.replace(/(^- .*$(\n|$))+/gm, (block) => {
-    const items = block.trim().split("\n").map(l => "<li>" + l.replace(/^- /, "") + "</li>").join("\n");
-    return "<ul>\n" + items + "\n</ul>\n";
+    const items = block.trim().split("\n").map(l => '<li style="margin-bottom:0.5rem;padding-left:0.25rem">' + l.replace(/^- /, "") + "</li>").join("\n");
+    return '<ul style="margin:1rem 0 1.5rem 1.25rem;line-height:1.8">\n' + items + "\n</ul>\n";
   });
   html = html.replace(/(^\d+\. .*$(\n|$))+/gm, (block) => {
-    const items = block.trim().split("\n").map(l => "<li>" + l.replace(/^\d+\. /, "") + "</li>").join("\n");
-    return "<ol>\n" + items + "\n</ol>\n";
+    const items = block.trim().split("\n").map(l => '<li style="margin-bottom:0.5rem;padding-left:0.25rem">' + l.replace(/^\d+\. /, "") + "</li>").join("\n");
+    return '<ol style="margin:1rem 0 1.5rem 1.25rem;line-height:1.8">\n' + items + "\n</ol>\n";
   });
 
-  // Wrap remaining plain text lines in <p> tags
+  // Wrap remaining plain text lines in <p> tags with good readability
   html = html.split("\n\n").map(block => {
     block = block.trim();
     if (!block) return "";
     if (block.startsWith("<h") || block.startsWith("<ul") || block.startsWith("<ol") || block.startsWith("<p")) return block;
-    return "<p>" + block.replace(/\n/g, "<br>") + "</p>";
+    return '<p style="margin-bottom:1.25rem;line-height:1.9;font-size:1.05rem;color:#333">' + block.replace(/\n/g, "<br>") + "</p>";
   }).join("\n\n");
 
   return html;
@@ -926,18 +925,30 @@ ${blogSamples.map((s, i) => "--- Post " + (i + 1) + " ---\n" + s).join("\n\n")}
 ALREADY PUBLISHED TITLES (DO NOT repeat):
 ${existingPosts.join("\n")}
 
-Write a ~1500 word SEO-optimized blog post. Pick a topic relevant to the business niche that hasn't been covered yet.
+Write a ~800 word blog post. Pick a topic relevant to the business niche that hasn't been covered yet.
+
+WRITING RULES — VERY IMPORTANT:
+- Write for a normal person, NOT a technical audience. Use simple, everyday language.
+- Keep sentences short (under 20 words). Keep paragraphs to 2-3 sentences max.
+- NO jargon, buzzwords, or filler phrases like "In today's rapidly evolving landscape" or "leveraging cutting-edge solutions".
+- Be direct and practical. Give real examples and actionable tips.
+- Use ## headings to break content into scannable sections (5-6 sections).
+- Use bullet points for lists — keep each bullet to one line.
+- Start with a hook that states the problem or benefit clearly.
+- End with a short, clear call to action (1-2 sentences).
+- The tone should feel like a helpful friend explaining something, not a corporate whitepaper.
+- DO NOT use the word "revolutionize", "transform", "leverage", "cutting-edge", "game-changer", or "unlock".
 
 Respond in this exact JSON format:
 {
-  "title": "Blog post title (60 chars max, include primary keyword)",
+  "title": "Blog post title (60 chars max, clear and simple)",
   "slug": "url-friendly-slug",
   "metaTitle": "SEO meta title (60 chars max)",
   "metaDescription": "SEO meta description (155 chars max)",
-  "excerpt": "2-3 sentence excerpt for previews",
+  "excerpt": "1-2 sentence plain-English summary",
   "category": "Main category",
   "tags": ["tag1", "tag2", "tag3"],
-  "content": "Full blog post in markdown format with ## headings, bullet points, and a conclusion. ~1500 words.",
+  "content": "Full blog post in markdown. ~800 words. Short paragraphs, simple language, bullet points where helpful.",
   "imagePrompt": "A detailed prompt for generating a hero image for this post",
   "socialSnippets": {
     "linkedin": "LinkedIn post to promote this article (2-3 sentences)",
@@ -1340,18 +1351,30 @@ ${blogSamples.map((s, i) => "--- Post " + (i + 1) + " ---\n" + s).join("\n\n")}
 ALREADY PUBLISHED TITLES (DO NOT repeat any of these — pick a COMPLETELY DIFFERENT topic):
 ${existingPosts.join("\n")}
 
-Write a ~1500 word SEO-optimized blog post. Pick a topic relevant to the business niche that is COMPLETELY DIFFERENT from previously published titles.
+Write a ~800 word blog post. Pick a topic relevant to the business niche that is COMPLETELY DIFFERENT from previously published titles.
+
+WRITING RULES — VERY IMPORTANT:
+- Write for a normal person, NOT a technical audience. Use simple, everyday language.
+- Keep sentences short (under 20 words). Keep paragraphs to 2-3 sentences max.
+- NO jargon, buzzwords, or filler phrases like "In today's rapidly evolving landscape" or "leveraging cutting-edge solutions".
+- Be direct and practical. Give real examples and actionable tips.
+- Use ## headings to break content into scannable sections (5-6 sections).
+- Use bullet points for lists — keep each bullet to one line.
+- Start with a hook that states the problem or benefit clearly.
+- End with a short, clear call to action (1-2 sentences).
+- The tone should feel like a helpful friend explaining something, not a corporate whitepaper.
+- DO NOT use the word "revolutionize", "transform", "leverage", "cutting-edge", "game-changer", or "unlock".
 
 Respond in this exact JSON format:
 {
-  "title": "Blog post title (60 chars max, include primary keyword)",
+  "title": "Blog post title (60 chars max, clear and simple)",
   "slug": "url-friendly-slug",
   "metaTitle": "SEO meta title (60 chars max)",
   "metaDescription": "SEO meta description (155 chars max)",
-  "excerpt": "2-3 sentence excerpt for previews",
+  "excerpt": "1-2 sentence plain-English summary",
   "category": "Main category",
   "tags": ["tag1", "tag2", "tag3"],
-  "content": "Full blog post in markdown format with ## headings, bullet points, and a conclusion. ~1500 words.",
+  "content": "Full blog post in markdown. ~800 words. Short paragraphs, simple language, bullet points where helpful.",
   "imagePrompt": "A detailed prompt for generating a hero image for this post",
   "socialSnippets": {
     "linkedin": "LinkedIn post to promote this article (2-3 sentences)",
