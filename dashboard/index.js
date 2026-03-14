@@ -198,7 +198,7 @@ function markdownToHtml(md) {
     .replace(/^# (.*$)/gm, '<h1 style="font-size:2rem;font-weight:800;margin:1rem 0 1.5rem">$1</h1>')
     .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>")
     .replace(/\*(.*?)\*/g, "<em>$1</em>")
-    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>');
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener" style="text-decoration:underline;text-underline-offset:3px;font-weight:500">$1</a>');
 
   // Handle lists — no color styles, inherit from site
   html = html.replace(/(^- .*$(\n|$))+/gm, (block) => {
