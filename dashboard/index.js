@@ -1270,8 +1270,11 @@ app.post("/api/rewrite-all", async (req, res) => {
     const site = sites.find(s => s.id === post.site_id);
     if (!site) continue;
 
+    // Collect other post titles so AI avoids similar titles
+    const otherTitles = posts.filter((p, j) => j !== i && p.status === "published").map(p => p.title);
+
     try {
-      const rewritten = await aiRequest(`Rewrite this blog post so it reads like it was written by a real expert — not an AI.
+      const rewritten = await aiRequest(`Rewrite this blog post so it reads like it was written by a real industry expert — not an AI.
 
 ORIGINAL TITLE: ${post.title}
 ORIGINAL CONTENT:
@@ -1281,27 +1284,32 @@ COMPANY: ${site.name}
 NICHE: ${site.niche}
 TONE: ${site.tone || "professional but friendly"}
 
+OTHER POST TITLES (your new title MUST be different from all of these — do NOT start with the same word or use the same pattern):
+${otherTitles.join("\n")}
+
 REWRITING RULES:
-- Keep the SAME topic but make the content REAL and USEFUL.
-- Add REAL statistics with sources (e.g. "According to McKinsey..." or "A 2024 Salesforce report found...").
-- Mention REAL tools, platforms, or companies by name.
+- Keep the SAME topic but completely rewrite the content to be REAL and USEFUL.
+- Every statistic MUST include its source in parentheses, e.g. "67% of customers prefer self-service (Zendesk CX Trends Report 2024)" or "AI adoption grew 270% in 4 years (Gartner, 2023)".
+- Include at least 4-5 real statistics with named sources throughout the article.
+- Mention REAL tools, platforms, or companies by name (e.g. Intercom, Zendesk, HubSpot, Drift, Tidio, Google Dialogflow, Amazon Lex).
+- Include at least ONE specific real-world case study with a company name and result (e.g. "Sephora's chatbot increased booking rates by 11% — Forbes").
 - Use SPECIFIC numbers instead of vague claims.
-- Include at least ONE real-world example or mini case study.
-- Give ACTIONABLE steps, not generic advice.
+- Give ACTIONABLE steps readers can follow today.
 - Write for a normal person. Simple, clear language. No jargon.
 - Short sentences (under 20 words). Short paragraphs (2-3 sentences).
 - Use ## headings (5-6 sections). Use bullet points where helpful.
-- Start with a specific hook (a stat, question, or bold claim).
-- End with a clear call to action.
-- BANNED words: revolutionize, transform, leverage, cutting-edge, game-changer, unlock, streamline, robust, seamless.
+- Start with a specific hook — a surprising stat with its source.
+- End with a clear call to action mentioning ${site.name}.
+- BANNED words: revolutionize, transform, leverage, cutting-edge, game-changer, unlock, streamline, robust, seamless, boost, boosting, empower, harness, harnessing.
+- DO NOT start the title with "Boost", "How", or any word used by other titles above. Each title must feel unique.
 - ~800 words. Cut all fluff.
 
 Respond in JSON:
 {
-  "title": "Engaging title with primary keyword (60 chars max)",
-  "metaDescription": "Compelling meta description with keyword (155 chars max)",
+  "title": "Unique, engaging title with primary keyword (60 chars max, different pattern from other titles)",
+  "metaDescription": "Compelling meta description with keyword and a reason to click (155 chars max)",
   "excerpt": "1-2 sentence summary that makes people want to read",
-  "content": "Rewritten blog post in markdown. ~800 words. Real stats, real examples, real tool names, specific numbers."
+  "content": "Rewritten blog post in markdown. ~800 words. Every stat must have a named source in parentheses. Real case studies, real tool names, specific numbers."
 }`);
 
       // Update post data
