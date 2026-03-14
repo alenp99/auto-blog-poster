@@ -907,7 +907,7 @@ app.post("/sites/:id/generate", async (req, res) => {
     updateProgress(genId, "Topic Selection", "AI is picking a unique topic...");
 
     // Generate the blog post
-    const post = await aiRequest(`You are an expert SEO blog writer. Generate a complete blog post for this website.
+    const post = await aiRequest(`You are a senior content writer who writes blog posts that read like they were written by a real industry expert — not an AI.
 
 WEBSITE: ${site.domain}
 COMPANY: ${site.name}
@@ -926,36 +926,36 @@ ${blogSamples.map((s, i) => "--- Post " + (i + 1) + " ---\n" + s).join("\n\n")}
 ALREADY PUBLISHED TITLES (DO NOT repeat or write anything similar):
 ${existingPosts.join("\n")}
 
-TOPIC DIVERSITY — CRITICAL:
-You MUST pick a topic that is genuinely DIFFERENT from the titles above. Do NOT just rephrase the same ideas.
-Think beyond the obvious. Consider these angles for variety:
-- Industry trends or news relevant to the niche
-- Common mistakes businesses make (and how to avoid them)
-- Behind-the-scenes / how things actually work
-- Cost comparisons, budgeting, or ROI discussions
-- Case study style: a specific problem and how it was solved
-- Beginner guides or "what you need to know before..."
-- Myths vs reality in the industry
-- Hiring, team building, or workflow tips related to the niche
-- Comparisons (e.g. option A vs option B)
-- Seasonal or timely topics
+TOPIC RULES:
+You MUST pick a topic COMPLETELY DIFFERENT from the titles above. Do NOT rephrase the same ideas.
+Choose ONE fresh angle:
+- A real industry problem and a practical solution with steps
+- A "mistakes to avoid" post with real consequences
+- Cost breakdown or budgeting guide with real numbers
+- A comparison of two real approaches, tools, or strategies
+- A beginner's guide that explains something people actually search for
+- A myth-busting post with evidence
+- A timely trend with real data behind it
 
-Pick ONE angle from above (or come up with your own unique angle) that has NOT been covered yet.
+CONTENT RULES — THIS IS WHAT MAKES IT REAL:
+1. Include REAL statistics with sources (e.g. "According to Gartner, 85% of customer interactions will be handled without a human by 2025").
+2. Mention REAL tools, platforms, or companies by name (e.g. "Tools like Intercom, Drift, and Zendesk offer...").
+3. Use SPECIFIC numbers, not vague claims (e.g. "saves an average of 12 hours per week" not "saves time").
+4. Include at least ONE real-world example or mini case study (e.g. "When Domino's added their chatbot, they saw a 30% increase in...").
+5. Give ACTIONABLE steps readers can follow today — not generic advice.
+6. Write like a knowledgeable person sharing what they've learned, not like a brochure.
 
-Write a ~800 word blog post on this fresh topic.
-
-WRITING RULES — VERY IMPORTANT:
-- Write for a normal person, NOT a technical audience. Use simple, everyday language.
-- Keep sentences short (under 20 words). Keep paragraphs to 2-3 sentences max.
-- NO jargon, buzzwords, or filler phrases like "In today's rapidly evolving landscape" or "leveraging cutting-edge solutions".
-- Be direct and practical. Give real examples and actionable tips.
-- Use ## headings to break content into scannable sections (5-6 sections).
-- Use bullet points for lists — keep each bullet to one line.
-- Start with a hook that states the problem or benefit clearly.
-- End with a short, clear call to action (1-2 sentences).
-- The tone should feel like a helpful friend explaining something, not a corporate whitepaper.
-- DO NOT use the word "revolutionize", "transform", "leverage", "cutting-edge", "game-changer", or "unlock".
+WRITING STYLE:
+- Write for a normal person. Simple, clear language. No jargon.
+- Short sentences (under 20 words). Short paragraphs (2-3 sentences).
+- Use ## headings to break into 5-6 scannable sections.
+- Use bullet points where they help. Keep each bullet to one line.
+- Start with a specific hook — a stat, a question, or a bold statement.
+- End with a clear, specific call to action.
+- NO filler phrases like "In today's rapidly evolving landscape".
+- BANNED words: revolutionize, transform, leverage, cutting-edge, game-changer, unlock, streamline, robust, seamless.
 - DO NOT start the title with "How". Vary your title formats.
+- ~800 words.
 
 Respond in this exact JSON format:
 {
@@ -1271,7 +1271,7 @@ app.post("/api/rewrite-all", async (req, res) => {
     if (!site) continue;
 
     try {
-      const rewritten = await aiRequest(`Rewrite this blog post to be much simpler and easier to read.
+      const rewritten = await aiRequest(`Rewrite this blog post so it reads like it was written by a real expert — not an AI.
 
 ORIGINAL TITLE: ${post.title}
 ORIGINAL CONTENT:
@@ -1281,24 +1281,27 @@ COMPANY: ${site.name}
 NICHE: ${site.niche}
 TONE: ${site.tone || "professional but friendly"}
 
-REWRITING RULES — VERY IMPORTANT:
-- Keep the SAME topic and key points, but make it WAY simpler.
-- Write for a normal person, NOT a technical audience. Use everyday language.
-- Keep sentences short (under 20 words). Keep paragraphs to 2-3 sentences max.
-- NO jargon or buzzwords. NO phrases like "In today's rapidly evolving landscape", "leveraging", "cutting-edge", "game-changer", "revolutionize", "transform", "unlock".
-- Be direct and practical. Give real examples and actionable tips.
-- Use ## headings to break content into 5-6 scannable sections.
-- Use bullet points for lists — keep each bullet to one short line.
-- Start with a clear hook. End with a 1-2 sentence call to action.
-- Tone: helpful friend explaining something, not a corporate whitepaper.
-- Target ~600-800 words total. Cut the fluff.
+REWRITING RULES:
+- Keep the SAME topic but make the content REAL and USEFUL.
+- Add REAL statistics with sources (e.g. "According to McKinsey..." or "A 2024 Salesforce report found...").
+- Mention REAL tools, platforms, or companies by name.
+- Use SPECIFIC numbers instead of vague claims.
+- Include at least ONE real-world example or mini case study.
+- Give ACTIONABLE steps, not generic advice.
+- Write for a normal person. Simple, clear language. No jargon.
+- Short sentences (under 20 words). Short paragraphs (2-3 sentences).
+- Use ## headings (5-6 sections). Use bullet points where helpful.
+- Start with a specific hook (a stat, question, or bold claim).
+- End with a clear call to action.
+- BANNED words: revolutionize, transform, leverage, cutting-edge, game-changer, unlock, streamline, robust, seamless.
+- ~800 words. Cut all fluff.
 
 Respond in JSON:
 {
-  "title": "Simpler, clearer title (60 chars max)",
-  "metaDescription": "Plain-English meta description (155 chars max)",
-  "excerpt": "1-2 sentence simple summary",
-  "content": "Rewritten blog post in markdown. ~800 words max."
+  "title": "Engaging title with primary keyword (60 chars max)",
+  "metaDescription": "Compelling meta description with keyword (155 chars max)",
+  "excerpt": "1-2 sentence summary that makes people want to read",
+  "content": "Rewritten blog post in markdown. ~800 words. Real stats, real examples, real tool names, specific numbers."
 }`);
 
       // Update post data
@@ -1436,7 +1439,7 @@ app.post("/api/generate", async (req, res) => {
       const existingPosts = getPosts().filter(p => p.site_id === site.id).map(p => p.title);
       updateProgress(genId, "Generating", "AI is writing a blog post...");
 
-      const post = await aiRequest(`You are an expert SEO blog writer. Generate a complete blog post for this website.
+      const post = await aiRequest(`You are a senior content writer who writes blog posts that read like they were written by a real industry expert — not an AI.
 
 WEBSITE: ${site.domain}
 COMPANY: ${site.name}
@@ -1455,36 +1458,36 @@ ${blogSamples.map((s, i) => "--- Post " + (i + 1) + " ---\n" + s).join("\n\n")}
 ALREADY PUBLISHED TITLES (DO NOT repeat or write anything similar):
 ${existingPosts.join("\n")}
 
-TOPIC DIVERSITY — CRITICAL:
-You MUST pick a topic that is genuinely DIFFERENT from the titles above. Do NOT just rephrase the same ideas.
-Think beyond the obvious. Consider these angles for variety:
-- Industry trends or news relevant to the niche
-- Common mistakes businesses make (and how to avoid them)
-- Behind-the-scenes / how things actually work
-- Cost comparisons, budgeting, or ROI discussions
-- Case study style: a specific problem and how it was solved
-- Beginner guides or "what you need to know before..."
-- Myths vs reality in the industry
-- Hiring, team building, or workflow tips related to the niche
-- Comparisons (e.g. option A vs option B)
-- Seasonal or timely topics
+TOPIC RULES:
+You MUST pick a topic COMPLETELY DIFFERENT from the titles above. Do NOT rephrase the same ideas.
+Choose ONE fresh angle:
+- A real industry problem and a practical solution with steps
+- A "mistakes to avoid" post with real consequences
+- Cost breakdown or budgeting guide with real numbers
+- A comparison of two real approaches, tools, or strategies
+- A beginner's guide that explains something people actually search for
+- A myth-busting post with evidence
+- A timely trend with real data behind it
 
-Pick ONE angle from above (or come up with your own unique angle) that has NOT been covered yet.
+CONTENT RULES — THIS IS WHAT MAKES IT REAL:
+1. Include REAL statistics with sources (e.g. "According to Gartner, 85% of customer interactions will be handled without a human by 2025").
+2. Mention REAL tools, platforms, or companies by name (e.g. "Tools like Intercom, Drift, and Zendesk offer...").
+3. Use SPECIFIC numbers, not vague claims (e.g. "saves an average of 12 hours per week" not "saves time").
+4. Include at least ONE real-world example or mini case study (e.g. "When Domino's added their chatbot, they saw a 30% increase in...").
+5. Give ACTIONABLE steps readers can follow today — not generic advice.
+6. Write like a knowledgeable person sharing what they've learned, not like a brochure.
 
-Write a ~800 word blog post on this fresh topic.
-
-WRITING RULES — VERY IMPORTANT:
-- Write for a normal person, NOT a technical audience. Use simple, everyday language.
-- Keep sentences short (under 20 words). Keep paragraphs to 2-3 sentences max.
-- NO jargon, buzzwords, or filler phrases like "In today's rapidly evolving landscape" or "leveraging cutting-edge solutions".
-- Be direct and practical. Give real examples and actionable tips.
-- Use ## headings to break content into scannable sections (5-6 sections).
-- Use bullet points for lists — keep each bullet to one line.
-- Start with a hook that states the problem or benefit clearly.
-- End with a short, clear call to action (1-2 sentences).
-- The tone should feel like a helpful friend explaining something, not a corporate whitepaper.
-- DO NOT use the word "revolutionize", "transform", "leverage", "cutting-edge", "game-changer", or "unlock".
+WRITING STYLE:
+- Write for a normal person. Simple, clear language. No jargon.
+- Short sentences (under 20 words). Short paragraphs (2-3 sentences).
+- Use ## headings to break into 5-6 scannable sections.
+- Use bullet points where they help. Keep each bullet to one line.
+- Start with a specific hook — a stat, a question, or a bold statement.
+- End with a clear, specific call to action.
+- NO filler phrases like "In today's rapidly evolving landscape".
+- BANNED words: revolutionize, transform, leverage, cutting-edge, game-changer, unlock, streamline, robust, seamless.
 - DO NOT start the title with "How". Vary your title formats.
+- ~800 words.
 
 Respond in this exact JSON format:
 {
@@ -1495,7 +1498,7 @@ Respond in this exact JSON format:
   "excerpt": "1-2 sentence plain-English summary that makes people want to read more",
   "category": "Main category",
   "tags": ["tag1", "tag2", "tag3", "tag4", "tag5"],
-  "content": "Full blog post in markdown. ~800 words. Must include: primary keyword in first paragraph, ## headings with related keywords, internal context about the company, short paragraphs, bullet points. End with a clear CTA.",
+  "content": "Full blog post in markdown. ~800 words. Include real stats, real tool names, real examples, specific numbers. Primary keyword in first paragraph, keyword-rich headings. End with a CTA.",
   "imageAlt": "Descriptive alt text for the hero image (include primary keyword, describe what the image shows, under 125 chars)",
   "imagePrompt": "A professional, modern image relevant to this specific article topic. Be specific about the scene — include details about setting, objects, people, and mood. Do NOT include any text or words in the image. Style: clean, professional, high-quality photograph look.",
   "socialSnippets": {
