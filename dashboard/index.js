@@ -264,9 +264,10 @@ function openaiImageGenerate(prompt) {
 
 // Download an image from a URL and save it to the persistent images directory.
 // Returns the filename so it can be served permanently via /stored-images/.
-function downloadAndStoreImage(imageUrl) {
+function downloadAndStoreImage(imageUrl, slug) {
   return new Promise((resolve, reject) => {
-    const filename = crypto.randomUUID() + ".png";
+    // Use slug-based filename for SEO (e.g. ai-chatbots-guide.png)
+    const filename = (slug || crypto.randomUUID()) + ".png";
     const filepath = path.join(IMAGES_DIR, filename);
     const client = imageUrl.startsWith("https") ? https : http;
 
@@ -958,23 +959,24 @@ WRITING RULES — VERY IMPORTANT:
 
 Respond in this exact JSON format:
 {
-  "title": "Blog post title (60 chars max, clear and simple)",
-  "slug": "url-friendly-slug",
-  "metaTitle": "SEO meta title (60 chars max)",
-  "metaDescription": "SEO meta description (155 chars max)",
-  "excerpt": "1-2 sentence plain-English summary",
+  "title": "Blog post title (60 chars max, include primary keyword naturally)",
+  "slug": "keyword-rich-url-slug (3-5 words, include main keyword)",
+  "metaTitle": "SEO meta title (60 chars max, primary keyword near the start)",
+  "metaDescription": "Compelling meta description (150-155 chars, include keyword, end with a reason to click)",
+  "excerpt": "1-2 sentence plain-English summary that makes people want to read more",
   "category": "Main category",
-  "tags": ["tag1", "tag2", "tag3"],
-  "content": "Full blog post in markdown. ~800 words. Short paragraphs, simple language, bullet points where helpful.",
-  "imagePrompt": "A detailed prompt for generating a hero image for this post",
+  "tags": ["tag1", "tag2", "tag3", "tag4", "tag5"],
+  "content": "Full blog post in markdown. ~800 words. Must include: primary keyword in first paragraph, ## headings with related keywords, internal context about the company, short paragraphs, bullet points. End with a clear CTA.",
+  "imageAlt": "Descriptive alt text for the hero image (include primary keyword, describe what the image shows, under 125 chars)",
+  "imagePrompt": "A professional, modern image relevant to this specific article topic. Be specific about the scene — include details about setting, objects, people, and mood. Do NOT include any text or words in the image. Style: clean, professional, high-quality photograph look.",
   "socialSnippets": {
     "linkedin": "LinkedIn post to promote this article (2-3 sentences)",
     "twitter": "Tweet to promote this article (under 280 chars)"
   },
   "faq": [
-    {"question": "FAQ question 1", "answer": "Answer 1"},
-    {"question": "FAQ question 2", "answer": "Answer 2"},
-    {"question": "FAQ question 3", "answer": "Answer 3"}
+    {"question": "Natural question people would search for about this topic", "answer": "Clear, concise answer (2-3 sentences)"},
+    {"question": "Another common question", "answer": "Answer"},
+    {"question": "Third question", "answer": "Answer"}
   ]
 }`);
 
@@ -986,7 +988,7 @@ Respond in this exact JSON format:
     try {
       const dalleUrl = await openaiImageGenerate(post.imagePrompt || post.title);
       updateProgress(genId, "Saving Image", "Downloading image for permanent storage...");
-      const filename = await downloadAndStoreImage(dalleUrl);
+      const filename = await downloadAndStoreImage(dalleUrl, post.slug);
       imageUrl = getStoredImageUrl(filename);
       updateProgress(genId, "Image Ready", "Hero image generated and stored permanently");
     } catch (err) {
@@ -1010,7 +1012,13 @@ Respond in this exact JSON format:
       updateProgress(genId, "Publishing", "Sending to blog API at " + site.publish_endpoint + "...");
       const payload = {
         title: post.title, slug: post.slug, excerpt: post.excerpt,
-        content: htmlContent, image_url: imageUrl, author_name: site.name + " Team"
+        content: htmlContent, image_url: imageUrl,
+        image_alt: post.imageAlt || post.title,
+        meta_title: post.metaTitle || post.title,
+        meta_description: post.metaDescription || post.excerpt,
+        tags: post.tags || [],
+        category: post.category || "",
+        author_name: site.name + " Team"
       };
       try {
         const r = await publishToApi(site.publish_endpoint, site.publish_api_key, payload);
@@ -1038,6 +1046,7 @@ Respond in this exact JSON format:
       tags: post.tags || [], content: post.content,
       html_content: htmlContent,
       image_url: imageUrl,
+      image_alt: post.imageAlt || post.title,
       image_prompt: post.imagePrompt,
       social_linkedin: (post.socialSnippets || {}).linkedin || "",
       social_twitter: (post.socialSnippets || {}).twitter || "",
@@ -1166,6 +1175,11 @@ app.post("/posts/:id/approve", async (req, res) => {
       title: post.title, slug: post.slug, excerpt: post.excerpt,
       content: post.html_content || markdownToHtml(post.content),
       image_url: post.image_url || "",
+      image_alt: post.image_alt || post.title,
+      meta_title: post.meta_title || post.title,
+      meta_description: post.meta_description || post.excerpt,
+      tags: post.tags || [],
+      category: post.category || "",
       author_name: (site ? site.name : "Blog") + " Team"
     };
     try {
@@ -1300,6 +1314,11 @@ Respond in JSON:
         const payload = {
           title: posts[i].title, slug: post.slug, excerpt: posts[i].excerpt,
           content: posts[i].html_content, image_url: post.image_url,
+          image_alt: post.image_alt || posts[i].title,
+          meta_title: post.meta_title || posts[i].title,
+          meta_description: posts[i].meta_description || posts[i].excerpt,
+          tags: post.tags || [],
+          category: post.category || "",
           author_name: (site.name || "Blog") + " Team"
         };
         const r = await publishToApi(putEndpoint, site.publish_api_key, payload, "PUT");
@@ -1469,19 +1488,25 @@ WRITING RULES — VERY IMPORTANT:
 
 Respond in this exact JSON format:
 {
-  "title": "Blog post title (60 chars max, clear and simple)",
-  "slug": "url-friendly-slug",
-  "metaTitle": "SEO meta title (60 chars max)",
-  "metaDescription": "SEO meta description (155 chars max)",
-  "excerpt": "1-2 sentence plain-English summary",
+  "title": "Blog post title (60 chars max, include primary keyword naturally)",
+  "slug": "keyword-rich-url-slug (3-5 words, include main keyword)",
+  "metaTitle": "SEO meta title (60 chars max, primary keyword near the start)",
+  "metaDescription": "Compelling meta description (150-155 chars, include keyword, end with a reason to click)",
+  "excerpt": "1-2 sentence plain-English summary that makes people want to read more",
   "category": "Main category",
-  "tags": ["tag1", "tag2", "tag3"],
-  "content": "Full blog post in markdown. ~800 words. Short paragraphs, simple language, bullet points where helpful.",
-  "imagePrompt": "A detailed prompt for generating a hero image for this post",
+  "tags": ["tag1", "tag2", "tag3", "tag4", "tag5"],
+  "content": "Full blog post in markdown. ~800 words. Must include: primary keyword in first paragraph, ## headings with related keywords, internal context about the company, short paragraphs, bullet points. End with a clear CTA.",
+  "imageAlt": "Descriptive alt text for the hero image (include primary keyword, describe what the image shows, under 125 chars)",
+  "imagePrompt": "A professional, modern image relevant to this specific article topic. Be specific about the scene — include details about setting, objects, people, and mood. Do NOT include any text or words in the image. Style: clean, professional, high-quality photograph look.",
   "socialSnippets": {
     "linkedin": "LinkedIn post to promote this article (2-3 sentences)",
     "twitter": "Tweet to promote this article (under 280 chars)"
-  }
+  },
+  "faq": [
+    {"question": "Natural question people would search for about this topic", "answer": "Clear, concise answer (2-3 sentences)"},
+    {"question": "Another common question", "answer": "Answer"},
+    {"question": "Third question", "answer": "Answer"}
+  ]
 }`);
 
       updateProgress(genId, "Post Generated", post.title);
@@ -1490,7 +1515,7 @@ Respond in this exact JSON format:
       let imageUrl = "";
       try {
         const dalleUrl = await openaiImageGenerate(post.imagePrompt || post.title);
-        const filename = await downloadAndStoreImage(dalleUrl);
+        const filename = await downloadAndStoreImage(dalleUrl, post.slug);
         imageUrl = getStoredImageUrl(filename);
       } catch {
         const keywords = (site.target_keywords || []).length > 0 ? site.target_keywords : [site.niche || "technology"];
@@ -1505,7 +1530,13 @@ Respond in this exact JSON format:
       if (site.auto_approved && site.publish_endpoint) {
         const payload = {
           title: post.title, slug: post.slug, excerpt: post.excerpt,
-          content: htmlContent, image_url: imageUrl, author_name: site.name + " Team"
+          content: htmlContent, image_url: imageUrl,
+          image_alt: post.imageAlt || post.title,
+          meta_title: post.metaTitle || post.title,
+          meta_description: post.metaDescription || post.excerpt,
+          tags: post.tags || [],
+          category: post.category || "",
+          author_name: site.name + " Team"
         };
         try {
           const r = await publishToApi(site.publish_endpoint, site.publish_api_key, payload);
@@ -1523,9 +1554,11 @@ Respond in this exact JSON format:
         excerpt: post.excerpt, category: post.category,
         tags: post.tags || [], content: post.content,
         html_content: htmlContent, image_url: imageUrl,
+        image_alt: post.imageAlt || post.title,
         image_prompt: post.imagePrompt,
         social_linkedin: (post.socialSnippets || {}).linkedin || "",
         social_twitter: (post.socialSnippets || {}).twitter || "",
+        faq: post.faq || [],
         status, published_url: publishedUrl,
         generated_at: new Date().toISOString(),
       });
