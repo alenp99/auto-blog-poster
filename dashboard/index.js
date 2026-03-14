@@ -938,11 +938,12 @@ Choose ONE fresh angle:
 - A timely trend with real data behind it
 
 CONTENT RULES — THIS IS WHAT MAKES IT REAL:
-1. Include REAL statistics with sources (e.g. "According to Gartner, 85% of customer interactions will be handled without a human by 2025").
-2. Mention REAL tools, platforms, or companies by name (e.g. "Tools like Intercom, Drift, and Zendesk offer...").
+1. Include REAL statistics with clickable source links in markdown, e.g. "85% of customer interactions will be handled without a human by 2025 ([Gartner](https://www.gartner.com/en/newsroom))".
+2. Mention REAL tools, platforms, or companies by name and link to them, e.g. "[Intercom](https://www.intercom.com), [Drift](https://www.drift.com), and [Zendesk](https://www.zendesk.com)".
 3. Use SPECIFIC numbers, not vague claims (e.g. "saves an average of 12 hours per week" not "saves time").
-4. Include at least ONE real-world example or mini case study (e.g. "When Domino's added their chatbot, they saw a 30% increase in...").
-5. Give ACTIONABLE steps readers can follow today — not generic advice.
+4. Include at least ONE real-world case study with a source link (e.g. "Domino's chatbot increased orders by 30% ([Forbes](https://www.forbes.com/...))").
+5. All source links MUST be real, valid URLs to the actual report or article page.
+6. Give ACTIONABLE steps readers can follow today — not generic advice.
 6. Write like a knowledgeable person sharing what they've learned, not like a brochure.
 
 WRITING STYLE:
@@ -1289,10 +1290,11 @@ ${otherTitles.join("\n")}
 
 REWRITING RULES:
 - Keep the SAME topic but completely rewrite the content to be REAL and USEFUL.
-- Every statistic MUST include its source in parentheses, e.g. "67% of customers prefer self-service (Zendesk CX Trends Report 2024)" or "AI adoption grew 270% in 4 years (Gartner, 2023)".
-- Include at least 4-5 real statistics with named sources throughout the article.
-- Mention REAL tools, platforms, or companies by name (e.g. Intercom, Zendesk, HubSpot, Drift, Tidio, Google Dialogflow, Amazon Lex).
-- Include at least ONE specific real-world case study with a company name and result (e.g. "Sephora's chatbot increased booking rates by 11% — Forbes").
+- Every statistic MUST include a clickable source link in markdown format, e.g. "67% of customers prefer self-service ([Zendesk CX Trends Report 2024](https://www.zendesk.com/cx-trends-report/))" or "AI adoption grew 270% in 4 years ([Gartner](https://www.gartner.com/en/newsroom))".
+- The source links MUST be real, valid URLs that actually exist — link to the original report, article, or press release page.
+- Include at least 4-5 real statistics with clickable source links throughout the article.
+- Mention REAL tools, platforms, or companies by name and link to them, e.g. "[Intercom](https://www.intercom.com), [Zendesk](https://www.zendesk.com), [HubSpot](https://www.hubspot.com)".
+- Include at least ONE specific real-world case study with a company name, result, and source link (e.g. "Sephora's chatbot increased booking rates by 11% ([Forbes](https://www.forbes.com/...)))").
 - Use SPECIFIC numbers instead of vague claims.
 - Give ACTIONABLE steps readers can follow today.
 - Write for a normal person. Simple, clear language. No jargon.
@@ -1478,11 +1480,12 @@ Choose ONE fresh angle:
 - A timely trend with real data behind it
 
 CONTENT RULES — THIS IS WHAT MAKES IT REAL:
-1. Include REAL statistics with sources (e.g. "According to Gartner, 85% of customer interactions will be handled without a human by 2025").
-2. Mention REAL tools, platforms, or companies by name (e.g. "Tools like Intercom, Drift, and Zendesk offer...").
+1. Include REAL statistics with clickable source links in markdown, e.g. "85% of customer interactions will be handled without a human by 2025 ([Gartner](https://www.gartner.com/en/newsroom))".
+2. Mention REAL tools, platforms, or companies by name and link to them, e.g. "[Intercom](https://www.intercom.com), [Drift](https://www.drift.com), and [Zendesk](https://www.zendesk.com)".
 3. Use SPECIFIC numbers, not vague claims (e.g. "saves an average of 12 hours per week" not "saves time").
-4. Include at least ONE real-world example or mini case study (e.g. "When Domino's added their chatbot, they saw a 30% increase in...").
-5. Give ACTIONABLE steps readers can follow today — not generic advice.
+4. Include at least ONE real-world case study with a source link (e.g. "Domino's chatbot increased orders by 30% ([Forbes](https://www.forbes.com/...))").
+5. All source links MUST be real, valid URLs to the actual report or article page.
+6. Give ACTIONABLE steps readers can follow today — not generic advice.
 6. Write like a knowledgeable person sharing what they've learned, not like a brochure.
 
 WRITING STYLE:
