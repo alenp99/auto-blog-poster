@@ -1215,39 +1215,31 @@ app.post("/posts/:id/reject", (req, res) => {
 // ---------------------------------------------------------------------------
 app.get("/api/version", (req, res) => { res.json({ version: "2.0.0", hasGenerate: true }); });
 
-// Regenerate images for all posts that have expired DALL-E URLs
+// Regenerate images for posts. Use ?force=true to regenerate even if images exist.
 app.post("/api/fix-images", async (req, res) => {
+  const force = req.query.force === "true" || (req.body && req.body.force);
   const posts = getPosts();
   const sites = getSites();
   let fixed = 0;
   for (let i = 0; i < posts.length; i++) {
     const post = posts[i];
-    // Skip if already using stored image or no image prompt
-    if (post.image_url && post.image_url.includes("/stored-images/")) continue;
-    if (!post.image_prompt && !post.title) continue;
+    if (!force && post.image_url && post.image_url.includes("/stored-images/")) continue;
+    if (!post.title) continue;
 
     try {
-      const dalleUrl = await openaiImageGenerate(post.image_prompt || post.title);
-      const filename = await downloadAndStoreImage(dalleUrl);
+      // Generate a specific image prompt based on the post title and content
+      const imgPrompt = post.image_prompt || "A professional, high-quality photograph for a blog post titled: " + post.title + ". Modern, clean, relevant to the topic. No text or words in the image.";
+      const dalleUrl = await openaiImageGenerate(imgPrompt);
+      const filename = await downloadAndStoreImage(dalleUrl, post.slug);
       const permanentUrl = getStoredImageUrl(filename, req);
       posts[i].image_url = permanentUrl;
 
-      // Also update on Synthera if published — try PUT first (update), fall back to POST
+      // Update on the target site via PUT
       const site = sites.find(s => s.id === post.site_id);
       if (site && site.publish_endpoint && post.status === "published") {
-        const payload = {
-          title: post.title, slug: post.slug, excerpt: post.excerpt,
-          content: post.html_content || markdownToHtml(post.content),
-          image_url: permanentUrl, author_name: (site.name || "Blog") + " Team"
-        };
         try {
-          // Try PUT to update existing post by slug
           const putEndpoint = site.publish_endpoint.replace(/\/?$/, "/") + post.slug;
-          let r = await publishToApi(putEndpoint, site.publish_api_key, payload, "PUT");
-          if (!r.success) {
-            // Fall back to POST (some APIs upsert on same slug)
-            r = await publishToApi(site.publish_endpoint, site.publish_api_key, payload);
-          }
+          const r = await publishToApi(putEndpoint, site.publish_api_key, { image_url: permanentUrl, image_alt: post.image_alt || post.title }, "PUT");
           console.log("[Fix Images] " + post.title + ": " + (r.success ? "updated" : r.error));
         } catch {}
       }
