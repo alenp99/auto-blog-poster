@@ -3,3 +3,6 @@ dist/
 .env
 *.log
 .DS_Store
+.claude/cache/serp_results/
+output/api_payloads/*.json
+!output/api_payloads/.gitkeep

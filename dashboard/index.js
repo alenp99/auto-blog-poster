@@ -167,6 +167,163 @@ function aiRequest(prompt) {
   return Promise.reject(new Error("No AI API key configured"));
 }
 
+// ---------------------------------------------------------------------------
+// SERP Research — Google competitor analysis via SerpAPI
+// ---------------------------------------------------------------------------
+const SERPAPI_KEY = process.env.SERPAPI_KEY || "";
+const SERP_CACHE_DIR = path.join(DATA_DIR, "serp_results");
+if (!fs.existsSync(SERP_CACHE_DIR)) fs.mkdirSync(SERP_CACHE_DIR, { recursive: true });
+
+const SKIP_DOMAINS = ["youtube.com", "reddit.com", "wikipedia.org", "quora.com", "twitter.com", "x.com", "facebook.com", "linkedin.com"];
+
+function serpCachePath(query) {
+  const hash = crypto.createHash("sha256").update(query.toLowerCase().trim()).digest("hex").substring(0, 16);
+  return path.join(SERP_CACHE_DIR, hash + ".json");
+}
+
+function isSerpCacheValid(filePath) {
+  if (!fs.existsSync(filePath)) return false;
+  const ageMs = Date.now() - fs.statSync(filePath).mtimeMs;
+  return ageMs < 4 * 24 * 60 * 60 * 1000; // 4 days
+}
+
+async function callSerpApi(query) {
+  const params = new URLSearchParams({ engine: "google", q: query, api_key: SERPAPI_KEY, num: "10", gl: "au", hl: "en" });
+  const raw = await fetchUrl("https://serpapi.com/search.json?" + params.toString());
+  return JSON.parse(raw);
+}
+
+async function getCachedOrFetchSerp(query) {
+  const cachePath = serpCachePath(query);
+  if (isSerpCacheValid(cachePath)) {
+    console.log("    [cache hit] SERP: " + query);
+    return JSON.parse(fs.readFileSync(cachePath, "utf-8"));
+  }
+  console.log("    [API call] SERP: " + query);
+  const data = await callSerpApi(query);
+  fs.writeFileSync(cachePath, JSON.stringify(data, null, 2));
+  return data;
+}
+
+function parseSerpResponse(data) {
+  const topResults = (data.organic_results || []).slice(0, 10).map(r => ({
+    position: r.position, title: r.title || "", link: r.link || "", snippet: r.snippet || ""
+  }));
+  const peopleAlsoAsk = (data.related_questions || []).slice(0, 6).map(q => ({
+    question: q.question || "", snippet: q.snippet || ""
+  }));
+  const relatedSearches = (data.related_searches || []).slice(0, 8).map(s => s.query || "").filter(Boolean);
+  return { topResults, peopleAlsoAsk, relatedSearches };
+}
+
+async function fetchTopCompetitorArticles(urls) {
+  const blogUrls = urls.filter(u => { try { const h = new URL(u).hostname; return !SKIP_DOMAINS.some(d => h.includes(d)); } catch { return false; } }).slice(0, 3);
+  const summaries = [];
+  for (const url of blogUrls) {
+    try {
+      const html = await fetchUrl(url);
+      const text = htmlToText(html);
+      const headings = [];
+      const hRegex = /<h([1-3])[^>]*>([\s\S]*?)<\/h\1>/gi;
+      let m;
+      while ((m = hRegex.exec(html)) !== null) { const t = m[2].replace(/<[^>]+>/g, "").trim(); if (t) headings.push("H" + m[1] + ": " + t); }
+      summaries.push({ url, title: headings[0] ? headings[0].replace(/^H\d:\s*/, "") : url, headings, wordCount: text.split(/\s+/).length });
+    } catch {}
+  }
+  return summaries;
+}
+
+async function performSerpResearch(site) {
+  if (!SERPAPI_KEY) return null;
+  const year = new Date().getFullYear();
+  const kw1 = (site.target_keywords || [])[0] || site.niche;
+  const kw2 = (site.target_keywords || [])[1] || site.niche;
+  const modifiers = ["best practices", "guide", "tools", "strategies"];
+  const queries = [kw1 + " " + year, kw2 + " " + modifiers[Math.floor(Math.random() * modifiers.length)]];
+
+  let allResults = [], allPAA = [], allRelated = [];
+  for (const q of queries) {
+    const raw = await getCachedOrFetchSerp(q);
+    const parsed = parseSerpResponse(raw);
+    allResults.push(...parsed.topResults);
+    allPAA.push(...parsed.peopleAlsoAsk);
+    allRelated.push(...parsed.relatedSearches);
+  }
+
+  // Deduplicate
+  const seen = new Set();
+  allResults = allResults.filter(r => { if (seen.has(r.link)) return false; seen.add(r.link); return true; }).slice(0, 10);
+  const seenQ = new Set();
+  allPAA = allPAA.filter(q => { if (seenQ.has(q.question)) return false; seenQ.add(q.question); return true; });
+  allRelated = [...new Set(allRelated)];
+
+  const articles = await fetchTopCompetitorArticles(allResults.map(r => r.link));
+
+  // Analyze with AI
+  let insights = { commonKeywords: [], contentGaps: [], avgWordCount: 1500, commonHeadingPatterns: [], dominantContentFormat: "guide" };
+  try {
+    const serpTitles = allResults.map(r => r.position + '. "' + r.title + '" — ' + r.snippet).join("\n");
+    const articleInfo = articles.map(a => "URL: " + a.url + "\nHeadings: " + a.headings.join(" | ") + "\nWords: " + a.wordCount).join("\n\n");
+    insights = await aiRequest(`You are an SEO analyst. Analyze these Google search results for "${queries[0]}" and identify competitive insights.
+
+TOP GOOGLE RESULTS:
+${serpTitles}
+
+TOP ARTICLES:
+${articleInfo || "None fetched"}
+
+Respond in exact JSON:
+{"commonKeywords":["..."],"contentGaps":["..."],"avgWordCount":1500,"commonHeadingPatterns":["..."],"dominantContentFormat":"guide"}
+
+- commonKeywords: 5-8 keywords across multiple results
+- contentGaps: 3-5 topics competitors MISS (opportunities)
+- avgWordCount: estimated average of top articles
+- commonHeadingPatterns: 3-5 H2/H3 patterns used
+- dominantContentFormat: listicle|how-to|guide|comparison|case-study`);
+  } catch {}
+
+  return {
+    query: queries.join(" | "),
+    topResults: allResults,
+    peopleAlsoAsk: allPAA,
+    relatedSearches: allRelated,
+    articles,
+    insights
+  };
+}
+
+function formatSerpForPrompt(serp) {
+  if (!serp) return "";
+  const tops = serp.topResults.map(r => r.position + '. "' + r.title + '" — ' + r.snippet).join("\n");
+  const paa = serp.peopleAlsoAsk.map(q => "- " + q.question).join("\n");
+  const arts = serp.articles.map(a => "- " + a.title + " (" + a.wordCount + " words)").join("\n");
+  const ins = serp.insights;
+  return `
+SERP RESEARCH — WHAT'S CURRENTLY RANKING ON GOOGLE:
+Queries: ${serp.query}
+
+Top Google Results:
+${tops}
+
+People Also Ask:
+${paa || "- None found"}
+
+Related Searches: ${serp.relatedSearches.join(", ") || "None"}
+
+Top Competitor Articles:
+${arts || "- None fetched"}
+
+Competitive Analysis:
+- Avg word count: ${ins.avgWordCount}
+- Common headings: ${(ins.commonHeadingPatterns || []).join(", ") || "N/A"}
+- Content format: ${ins.dominantContentFormat}
+- Common keywords: ${(ins.commonKeywords || []).join(", ") || "N/A"}
+
+CONTENT GAPS (your opportunity):
+${(ins.contentGaps || []).map(g => "- " + g).join("\n") || "- None identified"}
+`;
+}
+
 function publishToApi(endpoint, apiKey, payload, method) {
   return new Promise((resolve) => {
     const url = new URL(endpoint);
@@ -191,32 +348,138 @@ function publishToApi(endpoint, apiKey, payload, method) {
 
 function markdownToHtml(md) {
   if (!md) return "";
-  let html = md
-    .replace(/&(?!amp;|lt;|gt;|quot;)/g, "&amp;")
-    .replace(/^### (.*$)/gm, '<h3 style="font-size:1.2rem;font-weight:700;margin:2rem 0 0.75rem">$1</h3>')
-    .replace(/^## (.*$)/gm, '<h2 style="font-size:1.5rem;font-weight:700;margin:2.5rem 0 1rem;padding-bottom:0.5rem;border-bottom:1px solid currentColor;opacity:0.9">$1</h2>')
-    .replace(/^# (.*$)/gm, '<h1 style="font-size:2rem;font-weight:800;margin:1rem 0 1.5rem">$1</h1>')
-    .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>")
-    .replace(/\*(.*?)\*/g, "<em>$1</em>")
-    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener" style="text-decoration:underline;text-underline-offset:3px;font-weight:500">$1</a>');
+  const lines = md.split("\n");
+  const output = [];
+  let inList = false; // false | "ul" | "ol"
+  let inFaqSection = false;
+  let faqItems = [];
+  let currentFaqQ = "";
+  let currentFaqA = [];
 
-  // Handle lists — no color styles, inherit from site
-  html = html.replace(/(^- .*$(\n|$))+/gm, (block) => {
-    const items = block.trim().split("\n").map(l => '<li style="margin-bottom:0.5rem">' + l.replace(/^- /, "") + "</li>").join("\n");
-    return '<ul style="margin:1rem 0 1.5rem 1.25rem;line-height:1.8">\n' + items + "\n</ul>\n";
-  });
-  html = html.replace(/(^\d+\. .*$(\n|$))+/gm, (block) => {
-    const items = block.trim().split("\n").map(l => '<li style="margin-bottom:0.5rem">' + l.replace(/^\d+\. /, "") + "</li>").join("\n");
-    return '<ol style="margin:1rem 0 1.5rem 1.25rem;line-height:1.8">\n' + items + "\n</ol>\n";
+  function flushList() { if (inList) { output.push(inList === "ol" ? "</ol>" : "</ul>"); inList = false; } }
+  function flushFaq() { if (currentFaqQ) { faqItems.push({ q: currentFaqQ, a: currentFaqA.join(" ").trim() }); currentFaqQ = ""; currentFaqA = []; } }
+  function renderFaq() {
+    if (!faqItems.length) return;
+    output.push('<div style="margin-top:2.5rem;margin-bottom:2rem;">');
+    output.push('<h2 style="font-size:1.5rem;font-weight:700;margin:2.5rem 0 1rem;padding-bottom:0.5rem;border-bottom:1px solid currentColor;opacity:0.9">Frequently Asked Questions</h2>');
+    for (const item of faqItems) {
+      output.push('<details style="margin-bottom:0.75rem;border:1px solid rgba(255,255,255,0.15);border-radius:8px;overflow:hidden;">');
+      output.push('<summary style="padding:1rem 1.25rem;font-weight:600;font-size:1.05rem;cursor:pointer;background:rgba(255,255,255,0.05);list-style:none;display:flex;justify-content:space-between;align-items:center;">' + item.q + '<span style="font-size:1.25rem;opacity:0.5;">+</span></summary>');
+      output.push('<div style="padding:0.75rem 1.25rem 1rem;line-height:1.8;opacity:0.85;font-size:1.05rem;">' + item.a + '</div>');
+      output.push('</details>');
+    }
+    output.push('</div>');
+    faqItems = [];
+    inFaqSection = false;
+  }
+  function inline(text) {
+    return text
+      .replace(/\*\*\*(.+?)\*\*\*/g, "<strong><em>$1</em></strong>")
+      .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+      .replace(/\*(.+?)\*/g, "<em>$1</em>")
+      .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+  }
+
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trim();
+    if (!trimmed) { flushList(); continue; }
+    if (/^#{1,3}\s*.*(FAQ|Frequently Asked)/i.test(trimmed)) { flushList(); inFaqSection = true; continue; }
+    if (inFaqSection) {
+      if (/^#{3,4}\s+/.test(trimmed)) { flushFaq(); currentFaqQ = inline(trimmed.replace(/^#{1,4}\s+/, "")); continue; }
+      if (/^#{1,2}\s+/.test(trimmed) && !/FAQ|Frequently/i.test(trimmed)) { flushFaq(); renderFaq(); }
+      else { currentFaqA.push(inline(trimmed.replace(/^[-*]\s+/, ""))); continue; }
+    }
+    if (/^# /.test(trimmed) && !/^## /.test(trimmed)) { flushList(); continue; } // skip H1
+    if (/^## /.test(trimmed) && !/^### /.test(trimmed)) { flushList(); output.push('<h2 style="font-size:1.5rem;font-weight:700;margin:2.5rem 0 1rem;padding-bottom:0.5rem;border-bottom:1px solid currentColor;opacity:0.9">' + inline(trimmed.replace(/^## /, "")) + '</h2>'); continue; }
+    if (/^### /.test(trimmed)) { flushList(); output.push('<h3 style="font-size:1.2rem;font-weight:700;margin:2rem 0 0.75rem">' + inline(trimmed.replace(/^### /, "")) + '</h3>'); continue; }
+    if (/^[-*] /.test(trimmed)) { if (!inList) { output.push('<ul style="margin:1rem 0 1.5rem 1.25rem;line-height:1.8">'); inList = "ul"; } output.push('<li style="margin-bottom:0.5rem">' + inline(trimmed.replace(/^[-*]\s+/, "")) + '</li>'); continue; }
+    if (/^\d+\.\s/.test(trimmed)) { if (!inList) { output.push('<ol style="margin:1rem 0 1.5rem 1.25rem;line-height:1.8">'); inList = "ol"; } output.push('<li style="margin-bottom:0.5rem">' + inline(trimmed.replace(/^\d+\.\s+/, "")) + '</li>'); continue; }
+    flushList();
+    output.push('<p style="margin-bottom:1.25rem;line-height:1.9;font-size:1.05rem">' + inline(trimmed) + '</p>');
+  }
+  flushList();
+  if (inFaqSection) { flushFaq(); renderFaq(); }
+  return output.join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// Inject backlinks into HTML content (post-processing)
+// ---------------------------------------------------------------------------
+function injectBacklinks(html, site, blogPosts) {
+  const externalLinks = [
+    ["Salesforce", { url: "https://www.salesforce.com", replace: "Salesforce" }],
+    ["HubSpot", { url: "https://www.hubspot.com", replace: "HubSpot" }],
+    ["Gartner", { url: "https://www.gartner.com", replace: "Gartner" }],
+    ["McKinsey", { url: "https://www.mckinsey.com", replace: "McKinsey" }],
+    ["Forrester", { url: "https://www.forrester.com", replace: "Forrester" }],
+    ["Intercom", { url: "https://www.intercom.com", replace: "Intercom" }],
+    ["Zendesk", { url: "https://www.zendesk.com", replace: "Zendesk" }],
+    ["Zapier", { url: "https://zapier.com", replace: "Zapier" }],
+    ["chatbot", { url: "https://www.intercom.com", replace: "chatbot" }],
+    ["chatbots", { url: "https://www.intercom.com", replace: "chatbots" }],
+    ["customer support", { url: "https://www.zendesk.com", replace: "customer support" }],
+    ["customer service", { url: "https://www.zendesk.com", replace: "customer service" }],
+    ["data analytics", { url: "https://www.tableau.com", replace: "data analytics" }],
+    ["analytics", { url: "https://www.tableau.com", replace: "analytics" }],
+    ["workflow automation", { url: "https://zapier.com", replace: "workflow automation" }],
+    ["automation tools", { url: "https://zapier.com", replace: "automation tools" }],
+    ["machine learning", { url: "https://cloud.google.com/ai-platform", replace: "machine learning" }],
+    ["AI models", { url: "https://openai.com", replace: "AI models" }],
+    ["CRM", { url: "https://www.salesforce.com", replace: "CRM" }],
+    ["ROI", { url: "https://hbr.org", replace: "ROI" }],
+    ["voice agent", { url: (site.domain || "") + "/#services", replace: "voice agent" }],
+    ["voice agents", { url: (site.domain || "") + "/#services", replace: "voice agents" }],
+    ["AI agent", { url: (site.domain || "") + "/#services", replace: "AI agent" }],
+    ["AI agents", { url: (site.domain || "") + "/#services", replace: "AI agents" }],
+    ["AI automation", { url: site.domain || "", replace: "AI automation" }],
+  ];
+
+  const linkedDomains = new Set();
+  (html.match(/href="([^"]+)"/g) || []).forEach(link => {
+    try { linkedDomains.add(new URL(link.replace(/href="([^"]+)"/, "$1")).hostname); } catch {}
   });
 
-  // Wrap remaining plain text in <p> — only spacing, no colors
-  html = html.split("\n\n").map(block => {
-    block = block.trim();
-    if (!block) return "";
-    if (block.startsWith("<h") || block.startsWith("<ul") || block.startsWith("<ol") || block.startsWith("<p")) return block;
-    return '<p style="margin-bottom:1.25rem;line-height:1.9;font-size:1.05rem">' + block.replace(/\n/g, "<br>") + "</p>";
-  }).join("\n\n");
+  let injectedExternal = 0, injectedInternal = 0;
+  for (const [keyword, { url }] of externalLinks) {
+    const isInternal = url.includes(site.domain);
+    if (injectedExternal >= 6 && !isInternal) continue;
+    if (injectedInternal >= 3 && isInternal) continue;
+    try { if (linkedDomains.has(new URL(url).hostname)) continue; } catch {}
+    const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const regex = new RegExp("(<(?:p|li)[^>]*>(?:(?!</(?:p|li)>).)*)\\b(" + escaped + ")\\b", "i");
+    const match = html.match(regex);
+    if (match) {
+      const before = match[1];
+      if (before.lastIndexOf("<a ") > before.lastIndexOf("</a>")) continue;
+      html = html.replace(match[0], match[1] + '<a href="' + url + '" target="_blank" rel="noopener noreferrer">' + match[2] + '</a>');
+      try { linkedDomains.add(new URL(url).hostname); } catch {}
+      if (isInternal) injectedInternal++; else injectedExternal++;
+    }
+  }
+
+  // Ensure internal company link
+  if ((html.match(new RegExp('href="[^"]*' + (site.domain || "synthera").replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + '[^"]*"', "g")) || []).length < 2) {
+    const firstH2End = html.indexOf("</h2>");
+    if (firstH2End > -1) {
+      const nextP = html.indexOf("<p", firstH2End);
+      if (nextP > -1) {
+        const insertPoint = html.indexOf(">", nextP) + 1;
+        html = html.substring(0, insertPoint) + 'At <a href="' + site.domain + '" target="_blank" rel="noopener noreferrer">' + site.name + '</a>, we work with businesses to address exactly these kinds of challenges. ' + html.substring(insertPoint);
+      }
+    }
+  }
+
+  // Add internal blog post link
+  if (blogPosts && blogPosts.length > 0) {
+    const post = blogPosts[Math.floor(Math.random() * Math.min(blogPosts.length, 5))];
+    const slug = (post || "").split("/").pop() || "";
+    const title = slug.replace(/-/g, " ");
+    const faqIdx = html.indexOf("Frequently Asked Questions");
+    const insertBefore = faqIdx > -1 ? html.lastIndexOf("<p", faqIdx) : html.lastIndexOf("<p");
+    if (insertBefore > -1) {
+      html = html.substring(0, insertBefore) + '<p style="margin-bottom:1.25rem;line-height:1.9;font-size:1.05rem">For more insights, see our related post on <a href="' + post + '" target="_blank" rel="noopener noreferrer">' + title + '</a>.</p>\n' + html.substring(insertBefore);
+    }
+  }
 
   return html;
 }
@@ -902,83 +1165,74 @@ app.post("/sites/:id/generate", async (req, res) => {
     } catch {}
     updateProgress(genId, "Content Gathered", "Read homepage + " + blogSamples.length + " existing blog posts");
 
-    // Get existing post titles to avoid duplicates
+    // SERP Research (optional)
+    let serpSection = "";
+    if (SERPAPI_KEY) {
+      updateProgress(genId, "SERP Research", "Analyzing top Google results for " + site.niche + "...");
+      try {
+        const serpData = await performSerpResearch(site);
+        if (serpData) {
+          serpSection = formatSerpForPrompt(serpData);
+          updateProgress(genId, "SERP Complete", "Analyzed " + serpData.topResults.length + " competitors");
+        }
+      } catch (err) {
+        console.log("  SERP research failed: " + err.message);
+      }
+    }
+
+    // Get existing post titles and blog URLs for linking
     const existingPosts = getPosts().filter(p => p.site_id === site.id).map(p => p.title);
+    let blogPostUrls2 = [];
+    try {
+      const blogHtml3 = await fetchUrl(site.domain.replace(/\/$/, "") + (site.blog_path || "/blog"));
+      const lr2 = /<a[^>]*href="([^"]*)"[^>]*>/gi;
+      let lm2;
+      while ((lm2 = lr2.exec(blogHtml3)) !== null) {
+        let href = lm2[1];
+        if (href.startsWith("/")) href = site.domain.replace(/\/$/, "") + href;
+        if (href.startsWith(site.domain) && href.includes((site.blog_path || "/blog") + "/")) blogPostUrls2.push(href);
+      }
+      blogPostUrls2 = [...new Set(blogPostUrls2)].slice(0, 10);
+    } catch {}
+
     updateProgress(genId, "Topic Selection", "AI is picking a unique topic...");
 
-    // Generate the blog post
-    const post = await aiRequest(`You are a senior content writer who writes blog posts that read like they were written by a real industry expert — not an AI.
+    const post = await aiRequest(`You are writing a blog post for ${site.name} (${site.domain}). The post must comply with Google's Helpful Content guidelines and E-E-A-T standards. People-first content that genuinely helps readers.
 
-WEBSITE: ${site.domain}
-COMPANY: ${site.name}
-NICHE: ${site.niche}
+COMPANY: ${site.name} — ${site.niche}
 TONE: ${site.tone}
-BRAND VOICE: ${site.brand_voice}
-CONTENT STYLE: ${site.content_style}
-TARGET KEYWORDS: ${(site.target_keywords || []).join(", ")}
+KEYWORDS: ${(site.target_keywords || []).join(", ")}
 
-HOMEPAGE CONTENT (for context):
-${homepageText}
+HOMEPAGE: ${homepageText.substring(0, 1500)}
 
-EXISTING BLOG POSTS (for style reference, DO NOT repeat these topics):
-${blogSamples.map((s, i) => "--- Post " + (i + 1) + " ---\n" + s).join("\n\n")}
+EXISTING POSTS (style reference): ${blogSamples.map((s, i) => "\n--- Post " + (i + 1) + " ---\n" + s).join("")}
 
-ALREADY PUBLISHED TITLES (DO NOT repeat or write anything similar):
-${existingPosts.join("\n")}
+DO NOT REPEAT: ${existingPosts.join(", ")}
+${serpSection}
+E-E-A-T COMPLIANCE:
+- Experience: Write from ${site.name}'s perspective. Use "In our experience...", "What we've seen with clients...", "A pattern we notice..."
+- Expertise: Show deep knowledge. Explain WHY things work, common MISTAKES, NUANCES only practitioners know.
+- Authoritativeness: Only reference verifiable facts. Link to company homepages, not fabricated article URLs.
+- Trustworthiness: Be honest about limitations. Mention when AI is NOT the right solution.
 
-TOPIC RULES:
-You MUST pick a topic COMPLETELY DIFFERENT from the titles above. Do NOT rephrase the same ideas.
-Choose ONE fresh angle:
-- A real industry problem and a practical solution with steps
-- A "mistakes to avoid" post with real consequences
-- Cost breakdown or budgeting guide with real numbers
-- A comparison of two real approaches, tools, or strategies
-- A beginner's guide that explains something people actually search for
-- A myth-busting post with evidence
-- A timely trend with real data behind it
+CONTENT: Open with a real problem. Share genuine practitioner insights. Include actionable steps. MUST end with "## Frequently Asked Questions" with 4-5 ### question subheadings and answers, then a CTA linking to ${site.domain}/contact.
 
-CONTENT RULES — THIS IS WHAT MAKES IT REAL:
-1. Include REAL statistics with clickable source links in markdown, e.g. "85% of customer interactions will be handled without a human by 2025 ([Gartner](https://www.gartner.com/en/newsroom))".
-2. Mention REAL tools, platforms, or companies by name and link to them, e.g. "[Intercom](https://www.intercom.com), [Drift](https://www.drift.com), and [Zendesk](https://www.zendesk.com)".
-3. Use SPECIFIC numbers, not vague claims (e.g. "saves an average of 12 hours per week" not "saves time").
-4. Include at least ONE real-world case study with a source link (e.g. "Domino's chatbot increased orders by 30% ([Forbes](https://www.forbes.com/...))").
-5. All source links MUST be real, valid URLs to the actual report or article page.
-6. Give ACTIONABLE steps readers can follow today — not generic advice.
-6. Write like a knowledgeable person sharing what they've learned, not like a brochure.
-
-WRITING STYLE:
-- Write for a normal person. Simple, clear language. No jargon.
-- Short sentences (under 20 words). Short paragraphs (2-3 sentences).
-- Use ## headings to break into 5-6 scannable sections.
-- Use bullet points where they help. Keep each bullet to one line.
-- Start with a specific hook — a stat, a question, or a bold statement.
-- End with a clear, specific call to action.
-- NO filler phrases like "In today's rapidly evolving landscape".
-- BANNED words: revolutionize, transform, leverage, cutting-edge, game-changer, unlock, streamline, robust, seamless.
-- DO NOT start the title with "How". Vary your title formats.
-- ~800 words.
+WRITING: Natural, clear, direct. Short paragraphs. 5-6 ## sections. No filler. BANNED: revolutionize, transform, leverage, cutting-edge, game-changer, unlock, streamline, robust, seamless, landscape, delve, comprehensive, navigate.
+~${site.post_length || 1200} words.
 
 Respond in this exact JSON format:
 {
-  "title": "Blog post title (60 chars max, include primary keyword naturally)",
-  "slug": "keyword-rich-url-slug (3-5 words, include main keyword)",
-  "metaTitle": "SEO meta title (60 chars max, primary keyword near the start)",
-  "metaDescription": "Compelling meta description (150-155 chars, include keyword, end with a reason to click)",
-  "excerpt": "1-2 sentence plain-English summary that makes people want to read more",
+  "title": "SEO title (under 60 chars)",
+  "slug": "keyword-rich-slug",
+  "metaTitle": "Meta title (60 chars max)",
+  "metaDescription": "150-155 chars, specific benefit",
+  "excerpt": "1-2 sentence summary",
   "category": "Main category",
   "tags": ["tag1", "tag2", "tag3", "tag4", "tag5"],
-  "content": "Full blog post in markdown. ~800 words. Must include: primary keyword in first paragraph, ## headings with related keywords, internal context about the company, short paragraphs, bullet points. End with a clear CTA.",
-  "imageAlt": "Descriptive alt text for the hero image (include primary keyword, describe what the image shows, under 125 chars)",
-  "imagePrompt": "A professional, modern image relevant to this specific article topic. Be specific about the scene — include details about setting, objects, people, and mood. Do NOT include any text or words in the image. Style: clean, professional, high-quality photograph look.",
-  "socialSnippets": {
-    "linkedin": "LinkedIn post to promote this article (2-3 sentences)",
-    "twitter": "Tweet to promote this article (under 280 chars)"
-  },
-  "faq": [
-    {"question": "Natural question people would search for about this topic", "answer": "Clear, concise answer (2-3 sentences)"},
-    {"question": "Another common question", "answer": "Answer"},
-    {"question": "Third question", "answer": "Answer"}
-  ]
+  "content": "Full markdown article with ## Frequently Asked Questions at the end",
+  "imageAlt": "Alt text for hero image (under 125 chars)",
+  "imagePrompt": "Professional image for this topic. NO text in image.",
+  "socialSnippets": { "linkedin": "2-3 sentences", "twitter": "Under 280 chars" }
 }`);
 
     updateProgress(genId, "Post Generated", "\"" + (post.title || "Untitled") + "\"");
@@ -994,14 +1248,14 @@ Respond in this exact JSON format:
       updateProgress(genId, "Image Ready", "Hero image generated and stored permanently");
     } catch (err) {
       console.error("Image generation failed:", err.message);
-      // Fallback to Unsplash
       const keywords = (site.target_keywords || []).length > 0 ? site.target_keywords : [post.category || site.niche || "technology"];
       imageUrl = generateImageUrl(keywords);
       updateProgress(genId, "Image Ready", "Using stock image (DALL-E unavailable)");
     }
 
-    // Convert markdown to HTML for publishing
-    const htmlContent = markdownToHtml(post.content);
+    // Convert to styled HTML with collapsible FAQ and inject backlinks
+    let htmlContent = markdownToHtml(post.content);
+    htmlContent = injectBacklinks(htmlContent, site, blogPostUrls2);
 
     // Save the post
     const postId = crypto.randomUUID();
@@ -1438,81 +1692,74 @@ app.post("/api/generate", async (req, res) => {
       } catch {}
       updateProgress(genId, "Content Gathered", "Read homepage + " + blogSamples.length + " blog posts");
 
+      // SERP Research (optional)
+      let serpSection = "";
+      if (SERPAPI_KEY) {
+        updateProgress(genId, "SERP Research", "Analyzing top Google results for " + site.niche + "...");
+        try {
+          const serpData = await performSerpResearch(site);
+          if (serpData) {
+            serpSection = formatSerpForPrompt(serpData);
+            updateProgress(genId, "SERP Complete", "Analyzed " + serpData.topResults.length + " competitors, " + serpData.peopleAlsoAsk.length + " PAA questions");
+          }
+        } catch (err) {
+          console.log("  SERP research failed for " + site.name + ": " + err.message);
+        }
+      }
+
       const existingPosts = getPosts().filter(p => p.site_id === site.id).map(p => p.title);
       updateProgress(genId, "Generating", "AI is writing a blog post...");
 
-      const post = await aiRequest(`You are a senior content writer who writes blog posts that read like they were written by a real industry expert — not an AI.
+      // Gather blog post URLs for internal linking
+      let blogPostUrls = [];
+      try {
+        const blogHtml2 = await fetchUrl(site.domain.replace(/\/$/, "") + (site.blog_path || "/blog"));
+        const lr = /<a[^>]*href="([^"]*)"[^>]*>/gi;
+        let lm;
+        while ((lm = lr.exec(blogHtml2)) !== null) {
+          let href = lm[1];
+          if (href.startsWith("/")) href = site.domain.replace(/\/$/, "") + href;
+          if (href.startsWith(site.domain) && href.includes((site.blog_path || "/blog") + "/")) blogPostUrls.push(href);
+        }
+        blogPostUrls = [...new Set(blogPostUrls)].slice(0, 10);
+      } catch {}
 
-WEBSITE: ${site.domain}
-COMPANY: ${site.name}
-NICHE: ${site.niche}
+      const post = await aiRequest(`You are writing a blog post for ${site.name} (${site.domain}). The post must comply with Google's Helpful Content guidelines and E-E-A-T standards. People-first content that genuinely helps readers.
+
+COMPANY: ${site.name} — ${site.niche}
 TONE: ${site.tone}
-BRAND VOICE: ${site.brand_voice}
-CONTENT STYLE: ${site.content_style}
-TARGET KEYWORDS: ${(site.target_keywords || []).join(", ")}
+KEYWORDS: ${(site.target_keywords || []).join(", ")}
 
-HOMEPAGE CONTENT (for context):
-${homepageText}
+HOMEPAGE: ${homepageText.substring(0, 1500)}
 
-EXISTING BLOG POSTS (for style reference, DO NOT repeat these topics):
-${blogSamples.map((s, i) => "--- Post " + (i + 1) + " ---\n" + s).join("\n\n")}
+EXISTING POSTS (style reference): ${blogSamples.map((s, i) => "\n--- Post " + (i + 1) + " ---\n" + s).join("")}
 
-ALREADY PUBLISHED TITLES (DO NOT repeat or write anything similar):
-${existingPosts.join("\n")}
+DO NOT REPEAT: ${existingPosts.join(", ")}
+${serpSection}
+E-E-A-T COMPLIANCE:
+- Experience: Write from ${site.name}'s perspective. Use "In our experience...", "What we've seen with clients...", "A pattern we notice..."
+- Expertise: Show deep knowledge. Explain WHY things work, common MISTAKES, NUANCES only practitioners know.
+- Authoritativeness: Only reference verifiable facts. Link to company homepages, not fabricated article URLs.
+- Trustworthiness: Be honest about limitations. Mention when AI is NOT the right solution.
 
-TOPIC RULES:
-You MUST pick a topic COMPLETELY DIFFERENT from the titles above. Do NOT rephrase the same ideas.
-Choose ONE fresh angle:
-- A real industry problem and a practical solution with steps
-- A "mistakes to avoid" post with real consequences
-- Cost breakdown or budgeting guide with real numbers
-- A comparison of two real approaches, tools, or strategies
-- A beginner's guide that explains something people actually search for
-- A myth-busting post with evidence
-- A timely trend with real data behind it
+CONTENT: Open with a real problem. Share genuine practitioner insights. Include actionable steps. MUST end with "## Frequently Asked Questions" with 4-5 ### question subheadings and answers, then a CTA linking to ${site.domain}/contact.
 
-CONTENT RULES — THIS IS WHAT MAKES IT REAL:
-1. Include REAL statistics with clickable source links in markdown, e.g. "85% of customer interactions will be handled without a human by 2025 ([Gartner](https://www.gartner.com/en/newsroom))".
-2. Mention REAL tools, platforms, or companies by name and link to them, e.g. "[Intercom](https://www.intercom.com), [Drift](https://www.drift.com), and [Zendesk](https://www.zendesk.com)".
-3. Use SPECIFIC numbers, not vague claims (e.g. "saves an average of 12 hours per week" not "saves time").
-4. Include at least ONE real-world case study with a source link (e.g. "Domino's chatbot increased orders by 30% ([Forbes](https://www.forbes.com/...))").
-5. All source links MUST be real, valid URLs to the actual report or article page.
-6. Give ACTIONABLE steps readers can follow today — not generic advice.
-6. Write like a knowledgeable person sharing what they've learned, not like a brochure.
-
-WRITING STYLE:
-- Write for a normal person. Simple, clear language. No jargon.
-- Short sentences (under 20 words). Short paragraphs (2-3 sentences).
-- Use ## headings to break into 5-6 scannable sections.
-- Use bullet points where they help. Keep each bullet to one line.
-- Start with a specific hook — a stat, a question, or a bold statement.
-- End with a clear, specific call to action.
-- NO filler phrases like "In today's rapidly evolving landscape".
-- BANNED words: revolutionize, transform, leverage, cutting-edge, game-changer, unlock, streamline, robust, seamless.
-- DO NOT start the title with "How". Vary your title formats.
-- ~800 words.
+WRITING: Natural, clear, direct. Short paragraphs. 5-6 ## sections. No filler. BANNED: revolutionize, transform, leverage, cutting-edge, game-changer, unlock, streamline, robust, seamless, landscape, delve, comprehensive, navigate.
+~${site.post_length || 1200} words.
 
 Respond in this exact JSON format:
 {
-  "title": "Blog post title (60 chars max, include primary keyword naturally)",
-  "slug": "keyword-rich-url-slug (3-5 words, include main keyword)",
-  "metaTitle": "SEO meta title (60 chars max, primary keyword near the start)",
-  "metaDescription": "Compelling meta description (150-155 chars, include keyword, end with a reason to click)",
-  "excerpt": "1-2 sentence plain-English summary that makes people want to read more",
+  "title": "SEO title (under 60 chars)",
+  "slug": "keyword-rich-slug",
+  "metaTitle": "Meta title (60 chars max)",
+  "metaDescription": "150-155 chars, specific benefit",
+  "excerpt": "1-2 sentence summary",
   "category": "Main category",
   "tags": ["tag1", "tag2", "tag3", "tag4", "tag5"],
-  "content": "Full blog post in markdown. ~800 words. Include real stats, real tool names, real examples, specific numbers. Primary keyword in first paragraph, keyword-rich headings. End with a CTA.",
-  "imageAlt": "Descriptive alt text for the hero image (include primary keyword, describe what the image shows, under 125 chars)",
-  "imagePrompt": "A professional, modern image relevant to this specific article topic. Be specific about the scene — include details about setting, objects, people, and mood. Do NOT include any text or words in the image. Style: clean, professional, high-quality photograph look.",
-  "socialSnippets": {
-    "linkedin": "LinkedIn post to promote this article (2-3 sentences)",
-    "twitter": "Tweet to promote this article (under 280 chars)"
-  },
-  "faq": [
-    {"question": "Natural question people would search for about this topic", "answer": "Clear, concise answer (2-3 sentences)"},
-    {"question": "Another common question", "answer": "Answer"},
-    {"question": "Third question", "answer": "Answer"}
-  ]
+  "content": "Full markdown article with ## Frequently Asked Questions at the end",
+  "imageAlt": "Alt text for hero image (under 125 chars)",
+  "imagePrompt": "Professional image for this topic. NO text in image.",
+  "socialSnippets": { "linkedin": "2-3 sentences", "twitter": "Under 280 chars" }
 }`);
 
       updateProgress(genId, "Post Generated", post.title);
@@ -1528,7 +1775,9 @@ Respond in this exact JSON format:
         imageUrl = generateImageUrl(keywords);
       }
 
-      const htmlContent = markdownToHtml(post.content);
+      // Convert to styled HTML with collapsible FAQ and inject backlinks
+      let htmlContent = markdownToHtml(post.content);
+      htmlContent = injectBacklinks(htmlContent, site, blogPostUrls);
       const postId = crypto.randomUUID();
       let status = "pending_review";
       let publishedUrl = "";

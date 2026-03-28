@@ -8,7 +8,7 @@
     "content_path": "content/blog",
     "blog_path": "/blog",
 
-    "publish_endpoint": "https://www.synthera.com.au/api/blog/create",
+    "publish_endpoint": "https://www.synthera.com.au/api/blog",
     "publish_api_key": "SYNTHERA_BLOG_API_KEY",
 
     "niche": "AI automation, SaaS platforms, AI agents",
@@ -21,32 +21,6 @@
     ],
 
     "post_length": 1500,
-
-    "auto_publish": true,
-    "publish_method": "api"
-  },
-
-  {
-    "name": "TechFuture",
-    "domain": "https://techfuture.io",
-    "platform": "nextjs",
-
-    "content_mode": "api",
-    "blog_path": "/blog",
-
-    "publish_endpoint": "https://techfuture.io/api/blog/create",
-    "publish_api_key": "TECHFUTURE_BLOG_API_KEY",
-
-    "niche": "future technology, AI tools, startups",
-    "tone": "informative and engaging",
-
-    "target_keywords": [
-      "AI trends",
-      "startup AI tools",
-      "automation platforms"
-    ],
-
-    "post_length": 1200,
 
     "auto_publish": true,
     "publish_method": "api"

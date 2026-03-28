@@ -6,8 +6,9 @@ The system is triggered externally by n8n every 4 days at 8 AM Sydney time.
 ## How It Works
 
 1. **Study** — Crawl each target website (homepage + existing blog posts) to understand its style, voice, and content
-2. **Generate** — Use Gemini AI to create blog posts that match each site's exact writing style
-3. **Publish** — POST the generated content directly to each site's blog API
+2. **SERP Research** — Query Google via SerpAPI to analyze top-ranking competitors, extract People Also Ask questions, identify content gaps, and understand what Google rewards for the site's niche keywords
+3. **Generate** — Use Gemini AI to create blog posts informed by both the site's style and SERP competitor intelligence
+4. **Publish** — POST the generated content directly to each site's blog API
 
 ## Rules
 
@@ -18,6 +19,7 @@ The system is triggered externally by n8n every 4 days at 8 AM Sydney time.
    - `.claude/cache/research_notes.md` — cached research, sources, keywords
    - `.claude/cache/image_prompts.md` — previously used image prompts
    - `.claude/cache/site_profiles/` — cached website analysis (refreshed weekly)
+   - `.claude/cache/serp_results/` — cached SerpAPI responses (refreshed every 4 days)
 
 2. Always study the target website before generating content.
 3. Generated content must match the site's actual writing style, brand voice, and structure.
@@ -42,3 +44,10 @@ The system is triggered externally by n8n every 4 days at 8 AM Sydney time.
 - **MDX sites**: Also generate `.mdx` file with frontmatter in `content_path`
 - All payloads saved locally to `output/api_payloads/` as backup
 - `publish_api_key` in sites.json references an environment variable name
+
+## Environment Variables
+
+- `GEMINI_API_KEY` — Required. Google Gemini API key for content generation
+- `SERPAPI_KEY` — Optional. SerpAPI key for Google competitor research. If not set, SERP research is skipped and content is generated without competitor analysis
+- `SYNTHERA_BLOG_API_KEY` / `TECHFUTURE_BLOG_API_KEY` — Bearer tokens for each site's blog API
+- `DASHBOARD_URL` — Optional. Dashboard server URL (defaults to http://localhost:3000)
